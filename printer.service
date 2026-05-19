@@ -1,0 +1,21 @@
+[Unit]
+Description=pos-ticker — ESC/POS thermal printer server (docker compose)
+After=docker.service network-online.target
+After=cloudflared.service tailscaled.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+# Update WorkingDirectory to wherever you cloned the repo
+WorkingDirectory=/opt/pos-ticker
+
+ExecStart=/usr/bin/docker compose up --remove-orphans
+ExecStop=/usr/bin/docker compose down
+
+Restart=on-failure
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target

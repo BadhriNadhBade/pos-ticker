@@ -1,0 +1,11 @@
+__pycache__
+*.pyc
+*.pyo
+*.db
+.env
+data/
+*.service
+*.example
+prometheus.yml
+otel-collector.yml
+docker-compose.yml

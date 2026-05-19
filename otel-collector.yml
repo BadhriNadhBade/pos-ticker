@@ -1,0 +1,72 @@
+# OpenTelemetry Collector — receives traces/metrics from the printer app
+# and fans them out to any combination of backends.
+#
+# To enable a backend, uncomment its exporter block and add it to
+# the pipelines section. No app code changes needed.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # Scrape Prometheus /metrics from the printer app
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: printer-server
+          scrape_interval: 15s
+          static_configs:
+            - targets: ['printer:8000']
+
+processors:
+  batch:
+    timeout: 5s
+  memory_limiter:
+    limit_mib: 128
+    check_interval: 5s
+
+exporters:
+
+  # ── Logging (always on — useful for debugging) ──────────────────────────────
+  debug:
+    verbosity: normal
+
+  # ── Prometheus remote write (to Proxmox Prometheus) ────────────────────────
+  # prometheusremotewrite:
+  #   endpoint: http://proxmox-tailscale-ip:9090/api/v1/write
+
+  # ── Datadog ─────────────────────────────────────────────────────────────────
+  # datadog:
+  #   api:
+  #     key: ${DD_API_KEY}
+  #     site: datadoghq.com
+
+  # ── Grafana Cloud (via OTLP) ────────────────────────────────────────────────
+  # otlphttp:
+  #   endpoint: https://otlp-gateway-prod-us-central-0.grafana.net/otlp
+  #   headers:
+  #     authorization: Basic ${GRAFANA_OTLP_TOKEN}
+
+  # ── Jaeger ───────────────────────────────────────────────────────────────────
+  # otlp/jaeger:
+  #   endpoint: http://jaeger:4317
+  #   tls:
+  #     insecure: true
+
+service:
+  pipelines:
+
+    traces:
+      receivers:  [otlp]
+      processors: [memory_limiter, batch]
+      exporters:  [debug]
+      # add datadog, otlphttp, etc. here when ready
+
+    metrics:
+      receivers:  [otlp, prometheus]
+      processors: [memory_limiter, batch]
+      exporters:  [debug]
+      # add prometheusremotewrite, datadog, etc. here when ready

@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Printer Admin</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    [x-cloak] { display: none; }
+    .fade { animation: fadeIn .2s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  </style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen font-mono text-sm">
+
+<!-- ── Header ───────────────────────────────────────────────────────────── -->
+<div class="border-b border-gray-800 px-6 py-4 flex items-center justify-between">
+  <div class="flex items-center gap-3">
+    <span class="text-2xl">🖨</span>
+    <span class="text-lg font-bold tracking-tight">Printer Admin</span>
+  </div>
+  <div class="flex items-center gap-2">
+    <input id="adminKey" type="password" placeholder="Admin key"
+      class="bg-gray-900 border border-gray-700 rounded px-3 py-1.5 text-sm w-52 focus:outline-none focus:border-blue-500"
+      oninput="saveKey(this.value)">
+    <button onclick="refresh()" class="bg-blue-600 hover:bg-blue-500 px-3 py-1.5 rounded text-sm transition">
+      Connect
+    </button>
+  </div>
+</div>
+
+<!-- ── Status bar ────────────────────────────────────────────────────────── -->
+<div id="statusBar" class="px-6 py-3 bg-gray-900 border-b border-gray-800 flex flex-wrap gap-6 items-center text-xs text-gray-400">
+  <span id="healthDot" class="flex items-center gap-1.5">
+    <span class="w-2 h-2 rounded-full bg-gray-600 inline-block"></span>
+    <span>not connected</span>
+  </span>
+  <span id="printerStatus">printer: —</span>
+  <span id="queueStatus">queue: —</span>
+  <span id="hourStatus">this hour: —</span>
+  <span class="ml-auto">
+    <a href="/docs" target="_blank" class="text-blue-400 hover:underline">API docs</a>
+    &nbsp;·&nbsp;
+    <a href="/metrics" target="_blank" class="text-blue-400 hover:underline">metrics</a>
+  </span>
+</div>
+
+<!-- ── Main grid ─────────────────────────────────────────────────────────── -->
+<div class="p-6 grid grid-cols-1 xl:grid-cols-3 gap-6">
+
+  <!-- ── Settings panel ───────────────────────────────────────────────────── -->
+  <div class="xl:col-span-1">
+    <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="font-bold text-gray-200">Settings</h2>
+        <button onclick="saveSettings()"
+          class="bg-green-700 hover:bg-green-600 px-3 py-1 rounded text-xs transition">
+          Save
+        </button>
+      </div>
+
+      <div id="settingsForm" class="space-y-3">
+        <!-- rendered by JS -->
+      </div>
+
+      <div id="settingsSaved" class="hidden mt-3 text-green-400 text-xs">Saved.</div>
+      <div id="settingsErr"   class="hidden mt-3 text-red-400 text-xs"></div>
+    </div>
+
+    <!-- ── Queue actions ───────────────────────────────────────────────────── -->
+    <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 mt-4">
+      <h2 class="font-bold text-gray-200 mb-3">Queue</h2>
+      <div class="flex gap-2">
+        <button onclick="drain()"
+          class="bg-orange-700 hover:bg-orange-600 px-3 py-1.5 rounded text-xs transition flex-1">
+          Drain queue
+        </button>
+        <button onclick="refresh()"
+          class="bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded text-xs transition flex-1">
+          Refresh
+        </button>
+      </div>
+      <div id="drainMsg" class="hidden mt-2 text-xs text-gray-400"></div>
+    </div>
+  </div>
+
+  <!-- ── Messages table ───────────────────────────────────────────────────── -->
+  <div class="xl:col-span-2">
+    <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="font-bold text-gray-200">Messages <span id="msgCount" class="text-gray-500 font-normal text-xs"></span></h2>
+        <div class="flex items-center gap-2 text-xs text-gray-400">
+          <button onclick="prevPage()" class="hover:text-white px-2">← prev</button>
+          <span id="pageLabel">page 1</span>
+          <button onclick="nextPage()" class="hover:text-white px-2">next →</button>
+        </div>
+      </div>
+
+      <div id="messagesTable" class="overflow-x-auto">
+        <div class="text-gray-600 text-xs">Enter admin key and click Connect.</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── Expanded message modal ─────────────────────────────────────────────── -->
+<div id="modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
+     onclick="if(event.target===this)closeModal()">
+  <div class="bg-gray-900 border border-gray-700 rounded-lg p-5 max-w-lg w-full fade">
+    <div class="flex justify-between items-start mb-3">
+      <div id="modalHeader" class="text-sm text-gray-300"></div>
+      <button onclick="closeModal()" class="text-gray-500 hover:text-white text-lg leading-none">✕</button>
+    </div>
+    <pre id="modalBody" class="text-xs text-gray-200 whitespace-pre-wrap break-words bg-gray-950 rounded p-3 max-h-72 overflow-y-auto"></pre>
+    <div id="modalMeta" class="mt-3 text-xs text-gray-500"></div>
+  </div>
+</div>
+
+<script>
+// ── State ────────────────────────────────────────────────────────────────────
+
+const PAGE_SIZE = 20;
+let currentPage = 0;
+let totalMsgs   = 0;
+
+const SETTING_LABELS = {
+  prints_per_hour:     'Prints / hour (global)',
+  max_per_ip_hour:     'Prints / IP / hour',
+  line_width:          'Line width (chars)',
+  allowed_origin:      'Allowed CORS origin',
+  printer_mode:        'Printer mode  (auto|usb|network)',
+  printer_host:        'Printer IP (network mode)',
+  printer_port:        'Printer port (default 9100)',
+  email_notifications: 'Email notifications (true|false)',
+};
+
+// ── Key persistence ──────────────────────────────────────────────────────────
+
+function saveKey(v) { sessionStorage.setItem('adminKey', v); }
+function getKey()   { return sessionStorage.getItem('adminKey') || ''; }
+
+document.addEventListener('DOMContentLoaded', () => {
+  const saved = getKey();
+  if (saved) {
+    document.getElementById('adminKey').value = saved;
+    refresh();
+  }
+});
+
+// ── API helpers ──────────────────────────────────────────────────────────────
+
+async function api(path, opts = {}) {
+  const key = getKey();
+  const res = await fetch(path, {
+    ...opts,
+    headers: { 'Content-Type': 'application/json', 'X-Admin-Key': key, ...(opts.headers || {}) },
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => res.statusText);
+    throw new Error(`${res.status}: ${txt}`);
+  }
+  return res.json();
+}
+
+// ── Refresh all panels ───────────────────────────────────────────────────────
+
+async function refresh() {
+  await Promise.allSettled([loadHealth(), loadQueue(), loadSettings(), loadMessages()]);
+}
+
+// ── Health ───────────────────────────────────────────────────────────────────
+
+async function loadHealth() {
+  try {
+    const h = await fetch('/health').then(r => r.json());
+    const dot  = document.getElementById('healthDot');
+    const psta = document.getElementById('printerStatus');
+    dot.innerHTML = `<span class="w-2 h-2 rounded-full bg-green-500 inline-block"></span><span class="text-green-400">healthy</span>`;
+    psta.textContent = `printer: ${h.printer}`;
+  } catch {
+    const dot = document.getElementById('healthDot');
+    dot.innerHTML = `<span class="w-2 h-2 rounded-full bg-red-500 inline-block"></span><span class="text-red-400">unreachable</span>`;
+  }
+}
+
+// ── Queue status ─────────────────────────────────────────────────────────────
+
+async function loadQueue() {
+  try {
+    const q = await api('/queue');
+    document.getElementById('queueStatus').textContent =
+      `queue: ${q.pending} pending, ${q.in_flight} in-flight`;
+    document.getElementById('hourStatus').textContent =
+      `this hour: ${q.printed_this_hour} / ${q.limit_per_hour}`;
+  } catch {
+    document.getElementById('queueStatus').textContent = 'queue: (auth needed)';
+  }
+}
+
+// ── Settings ─────────────────────────────────────────────────────────────────
+
+let _currentSettings = {};
+
+async function loadSettings() {
+  try {
+    _currentSettings = await api('/settings');
+    renderSettingsForm(_currentSettings);
+    document.getElementById('settingsErr').classList.add('hidden');
+  } catch (e) {
+    document.getElementById('settingsErr').textContent = e.message;
+    document.getElementById('settingsErr').classList.remove('hidden');
+  }
+}
+
+function renderSettingsForm(s) {
+  const el = document.getElementById('settingsForm');
+  el.innerHTML = Object.entries(SETTING_LABELS).map(([key, label]) => `
+    <div>
+      <label class="block text-xs text-gray-500 mb-1">${label}</label>
+      <input id="s_${key}" type="text" value="${escHtml(s[key] ?? '')}"
+        class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs
+               focus:outline-none focus:border-blue-500">
+    </div>
+  `).join('');
+}
+
+async function saveSettings() {
+  const updates = {};
+  for (const key of Object.keys(SETTING_LABELS)) {
+    const el = document.getElementById(`s_${key}`);
+    if (el) updates[key] = el.value;
+  }
+  try {
+    await api('/settings', { method: 'PATCH', body: JSON.stringify({ settings: updates }) });
+    const saved = document.getElementById('settingsSaved');
+    saved.classList.remove('hidden');
+    document.getElementById('settingsErr').classList.add('hidden');
+    setTimeout(() => saved.classList.add('hidden'), 2000);
+    await loadQueue();
+  } catch (e) {
+    const err = document.getElementById('settingsErr');
+    err.textContent = e.message;
+    err.classList.remove('hidden');
+  }
+}
+
+// ── Drain ────────────────────────────────────────────────────────────────────
+
+async function drain() {
+  const msg = document.getElementById('drainMsg');
+  try {
+    const r = await api('/drain', { method: 'POST' });
+    msg.textContent = `Queued ${r.queued_to_print} message(s) to print.`;
+    msg.classList.remove('hidden');
+    setTimeout(() => msg.classList.add('hidden'), 4000);
+    await loadQueue();
+  } catch (e) {
+    msg.textContent = e.message;
+    msg.classList.remove('hidden');
+  }
+}
+
+// ── Messages table ────────────────────────────────────────────────────────────
+
+async function loadMessages() {
+  const offset = currentPage * PAGE_SIZE;
+  try {
+    const data = await api(`/messages?limit=${PAGE_SIZE}&offset=${offset}`);
+    totalMsgs = data.total;
+    document.getElementById('msgCount').textContent = `(${totalMsgs})`;
+    document.getElementById('pageLabel').textContent =
+      `${currentPage + 1} / ${Math.max(1, Math.ceil(totalMsgs / PAGE_SIZE))}`;
+    renderTable(data.messages);
+  } catch (e) {
+    document.getElementById('messagesTable').innerHTML =
+      `<div class="text-red-400 text-xs">${escHtml(e.message)}</div>`;
+  }
+}
+
+function renderTable(msgs) {
+  if (!msgs.length) {
+    document.getElementById('messagesTable').innerHTML =
+      '<div class="text-gray-600 text-xs">No messages yet.</div>';
+    return;
+  }
+  const rows = msgs.map(m => {
+    const status = m.printed_at
+      ? `<span class="text-green-500">✓</span>`
+      : `<span class="text-yellow-500">pending</span>`;
+    const ts = m.browser_time || m.received_at || '—';
+    const preview = (m.message || '').slice(0, 60) + (m.message.length > 60 ? '…' : '');
+    return `
+      <tr class="border-t border-gray-800 hover:bg-gray-800/50 cursor-pointer"
+          onclick='showModal(${JSON.stringify(m)})'>
+        <td class="py-2 px-2 text-gray-500">#${m.id}</td>
+        <td class="py-2 px-2 text-gray-200">${escHtml(m.name)}</td>
+        <td class="py-2 px-2 text-gray-400 hidden sm:table-cell">${escHtml(m.email)}</td>
+        <td class="py-2 px-2 text-gray-300 max-w-xs truncate">${escHtml(preview)}</td>
+        <td class="py-2 px-2 text-gray-500 hidden md:table-cell whitespace-nowrap">${escHtml(ts)}</td>
+        <td class="py-2 px-2">${status}</td>
+      </tr>
+    `;
+  }).join('');
+
+  document.getElementById('messagesTable').innerHTML = `
+    <table class="w-full text-xs">
+      <thead>
+        <tr class="text-gray-500 text-left">
+          <th class="py-1 px-2">ID</th>
+          <th class="py-1 px-2">Name</th>
+          <th class="py-1 px-2 hidden sm:table-cell">Email</th>
+          <th class="py-1 px-2">Message</th>
+          <th class="py-1 px-2 hidden md:table-cell">Received</th>
+          <th class="py-1 px-2">Printed</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+function prevPage() {
+  if (currentPage > 0) { currentPage--; loadMessages(); }
+}
+function nextPage() {
+  if ((currentPage + 1) * PAGE_SIZE < totalMsgs) { currentPage++; loadMessages(); }
+}
+
+// ── Modal ────────────────────────────────────────────────────────────────────
+
+function showModal(m) {
+  document.getElementById('modalHeader').innerHTML =
+    `<strong>#${m.id}</strong> &nbsp; ${escHtml(m.name)} &lt;${escHtml(m.email)}&gt;`;
+  document.getElementById('modalBody').textContent = m.message;
+  document.getElementById('modalMeta').textContent =
+    `${m.browser_time || m.received_at || ''}  ·  IP: ${m.ip || '—'}  ·  ${m.printed_at ? 'printed: ' + m.printed_at : 'not yet printed'}`;
+  document.getElementById('modal').classList.remove('hidden');
+}
+function closeModal() { document.getElementById('modal').classList.add('hidden'); }
+
+// ── Util ─────────────────────────────────────────────────────────────────────
+
+function escHtml(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+</body>
+</html>

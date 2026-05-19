@@ -1,0 +1,71 @@
+services:
+
+  # ── Thermal printer API + admin UI ─────────────────────────────────────────
+  printer:
+    image: ghcr.io/badhrinadhbade/pos-ticker:latest
+    # To build from source instead, comment out image: above and uncomment:
+    # build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"        # API + admin UI (Tailscale: 100.x.x.x:8000, localhost cloudflared)
+    devices:
+      - /dev/bus/usb:/dev/bus/usb   # full USB passthrough for thermal printer
+    volumes:
+      - printer_data:/app/data      # SQLite DB
+    env_file: .env
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file          # switch to journald if running under systemd
+      options:
+        max-size: "10m"
+        max-file: "3"
+    depends_on:
+      otel-collector:
+        condition: service_started
+        required: false   # app starts even if collector is absent
+
+  # ── System metrics (host network so it sees all Pi interfaces) ──────────────
+  node-exporter:
+    image: prom/node-exporter:latest
+    restart: unless-stopped
+    network_mode: host
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── OpenTelemetry Collector ─────────────────────────────────────────────────
+  # Routes traces/metrics to any APM backend (Datadog, Jaeger, Grafana Cloud…)
+  # Configure backends in otel-collector.yml — no app code changes needed.
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    restart: unless-stopped
+    ports:
+      - "4317:4317"    # OTLP gRPC  (set OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317)
+      - "4318:4318"    # OTLP HTTP
+      - "8888:8888"    # Collector self-metrics (scraped by Proxmox Prometheus)
+    volumes:
+      - ./otel-collector.yml:/etc/otelcol-contrib/config.yaml:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  printer_data:

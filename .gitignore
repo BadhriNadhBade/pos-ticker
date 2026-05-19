@@ -1,0 +1,21 @@
+# secrets
+.env
+
+# database
+*.db
+data/
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# docker
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,32 @@
+# Local Prometheus on the Pi (optional — can run on Proxmox instead).
+# If running on Proxmox, replace service names with the Pi's Tailscale IP
+# (e.g., 100.x.x.x:8000, 100.x.x.x:9100).
+#
+# To add this to Proxmox Prometheus, append the scrape_configs below
+# to your existing prometheus.yml with the Tailscale IPs substituted.
+
+global:
+  scrape_interval:     15s
+  evaluation_interval: 15s
+  external_labels:
+    host: pi
+
+scrape_configs:
+
+  - job_name: printer-server
+    static_configs:
+      - targets: ['printer:8000']
+    # Proxmox equivalent:
+    #   targets: ['100.x.x.x:8000']
+
+  - job_name: node-exporter
+    static_configs:
+      - targets: ['localhost:9100']   # node-exporter uses host network
+    # Proxmox equivalent:
+    #   targets: ['100.x.x.x:9100']
+
+  - job_name: otel-collector
+    static_configs:
+      - targets: ['otel-collector:8888']
+    # Proxmox equivalent:
+    #   targets: ['100.x.x.x:8888']
