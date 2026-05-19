@@ -1,5 +1,5 @@
 fastapi>=0.111
-uvicorn[standard]>=0.29
+uvicorn>=0.29
 python-escpos>=3.0
 pillow>=10.0
 pilmoji>=2.0
