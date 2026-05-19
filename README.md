@@ -267,6 +267,63 @@ The GitHub Actions workflow (`.github/workflows/docker-publish.yml`) builds and 
 
 ---
 
+## Security & public deployment
+
+The `/contact` endpoint is designed to be public. Everything else should be locked down before you expose this to the internet.
+
+### Must-do before going public
+
+**1. Put HTTPS in front of it**
+
+The server speaks plain HTTP on port 8000. Run it behind a TLS-terminating reverse proxy. [Caddy](https://caddyserver.com) is the simplest option:
+
+```
+your-domain.com {
+    reverse_proxy localhost:8000
+}
+```
+
+Without HTTPS, the admin key and all submitted messages travel in plaintext.
+
+**2. Keep `/admin` and `/metrics` off the public internet**
+
+The admin UI and metrics endpoint are unauthenticated at the network level. Options:
+- Use [Tailscale](https://tailscale.com) — the recommended approach. Bind port 8000 to the Tailscale IP only, or use Tailscale ACLs.
+- Add HTTP basic auth at the reverse proxy layer for `/admin` and `/metrics`.
+
+**3. Set `TRUST_PROXY` correctly**
+
+| Deployment | Setting |
+|---|---|
+| Direct (no proxy) | `TRUST_PROXY=false` (default) |
+| Behind Cloudflare | `TRUST_PROXY=true` |
+| Behind nginx / Caddy | `TRUST_PROXY=true` |
+
+With `TRUST_PROXY=false`, the server uses the real socket IP for rate limiting. With `true`, it reads `CF-Connecting-IP` / `X-Forwarded-For` — only enable this if a trusted proxy actually sets those headers, otherwise anyone can spoof their IP and bypass the per-IP rate limit.
+
+**4. Set `ALLOWED_ORIGIN` to your exact domain**
+
+```
+ALLOWED_ORIGIN=https://yourname.com
+```
+
+This restricts which website can call `/contact` from a browser. Do not use `*`.
+
+### Already handled for you
+
+| Concern | How |
+|---|---|
+| SQL injection | Parameterised queries throughout |
+| XSS in admin UI | User data uses `textContent` / `escHtml()`; `onclick` handlers use integer indices, not raw JSON |
+| Brute-force on admin key | Failed attempts are logged with source IP; key is 48+ hex chars by default |
+| ESC/POS injection via `browser_time` | ASCII control characters stripped before storage and printing |
+| Container privilege | App runs as a non-root user inside the container |
+| OTEL/collector ports | Bound to `127.0.0.1` — not reachable from outside the host |
+| Security headers | `X-Content-Type-Options`, `X-Frame-Options`, `Content-Security-Policy` on all responses |
+| Admin key in browser | Stored in `sessionStorage` only — cleared when the tab closes |
+
+---
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

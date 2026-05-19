@@ -123,6 +123,7 @@
 const PAGE_SIZE = 20;
 let currentPage = 0;
 let totalMsgs   = 0;
+let _msgs       = [];
 
 const SETTING_LABELS = {
   prints_per_hour:     'Prints / hour (global)',
@@ -279,12 +280,13 @@ async function loadMessages() {
 }
 
 function renderTable(msgs) {
+  _msgs = msgs;
   if (!msgs.length) {
     document.getElementById('messagesTable').innerHTML =
       '<div class="text-gray-600 text-xs">No messages yet.</div>';
     return;
   }
-  const rows = msgs.map(m => {
+  const rows = msgs.map((m, i) => {
     const status = m.printed_at
       ? `<span class="text-green-500">✓</span>`
       : `<span class="text-yellow-500">pending</span>`;
@@ -292,7 +294,7 @@ function renderTable(msgs) {
     const preview = (m.message || '').slice(0, 60) + (m.message.length > 60 ? '…' : '');
     return `
       <tr class="border-t border-gray-800 hover:bg-gray-800/50 cursor-pointer"
-          onclick='showModal(${JSON.stringify(m)})'>
+          onclick="showModal(${i})">
         <td class="py-2 px-2 text-gray-500">#${m.id}</td>
         <td class="py-2 px-2 text-gray-200">${escHtml(m.name)}</td>
         <td class="py-2 px-2 text-gray-400 hidden sm:table-cell">${escHtml(m.email)}</td>
@@ -329,7 +331,8 @@ function nextPage() {
 
 // ── Modal ────────────────────────────────────────────────────────────────────
 
-function showModal(m) {
+function showModal(i) {
+  const m = _msgs[i];
   document.getElementById('modalHeader').innerHTML =
     `<strong>#${m.id}</strong> &nbsp; ${escHtml(m.name)} &lt;${escHtml(m.email)}&gt;`;
   document.getElementById('modalBody').textContent = m.message;

@@ -178,6 +178,9 @@ PRINTS_PER_HOUR=10
 MAX_PER_IP_HOUR=3
 LINE_WIDTH=${LINE_WIDTH}
 ALLOWED_ORIGIN=${ALLOWED_ORIGIN}
+
+# Set true only when behind a trusted reverse proxy (Cloudflare, nginx).
+TRUST_PROXY=false
 EOF
 chmod 600 "${REPO_DIR}/.env"
 ok ".env written (mode 600)"

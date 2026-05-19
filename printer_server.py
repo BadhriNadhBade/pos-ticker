@@ -48,6 +48,8 @@ SMTP_USER    = os.environ.get("SMTP_USER", "")
 SMTP_PASS    = os.environ.get("SMTP_PASS", "")
 NOTIFY_EMAIL = os.environ.get("NOTIFY_EMAIL", SMTP_USER)
 DB_PATH      = os.environ.get("DB_PATH", "/app/data/messages.db")
+# Only trust CF-Connecting-IP / X-Forwarded-For when running behind a known proxy.
+TRUST_PROXY  = os.environ.get("TRUST_PROXY", "false").lower() == "true"
 PACIFIC      = ZoneInfo("America/Los_Angeles")
 STATIC_DIR   = Path(__file__).parent / "static"
 
@@ -167,6 +169,13 @@ async def cors(request: Request, call_next):
     response.headers["Access-Control-Allow-Origin"]  = origin
     response.headers["Access-Control-Allow-Methods"] = "POST, GET, OPTIONS, PATCH"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Admin-Key"
+    response.headers["X-Content-Type-Options"]       = "nosniff"
+    response.headers["X-Frame-Options"]              = "DENY"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' https://cdn.tailwindcss.com 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'"
+    )
     return response
 
 
@@ -553,18 +562,21 @@ async def contact(request: Request):
     name         = (data.get("name",         "") or "").strip()[:64]
     email        = (data.get("email",        "") or "").strip()[:64]
     message      = (data.get("message",      "") or "").strip()[:150]
-    browser_time = (data.get("browser_time", "") or "").strip()[:64]
+    browser_time = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', (data.get("browser_time", "") or "").strip())[:64]
 
     if not (name and email and message):
         return JSONResponse({"error": "missing fields"}, status_code=400)
     if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
         return JSONResponse({"error": "invalid email"}, status_code=400)
 
-    ip = (
-        request.headers.get("CF-Connecting-IP")
-        or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-        or (request.client.host if request.client else "unknown")
-    )
+    if TRUST_PROXY:
+        ip = (
+            request.headers.get("CF-Connecting-IP")
+            or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+            or (request.client.host if request.client else "unknown")
+        )
+    else:
+        ip = request.client.host if request.client else "unknown"
     ua        = request.headers.get("User-Agent", "unknown")[:120]
     timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     max_ip    = _int_setting("max_per_ip_hour", 3)
