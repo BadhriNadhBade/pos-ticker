@@ -1,9 +1,28 @@
+# ── Stage 1: compile wheels ───────────────────────────────────────────────────
+# gcc + dev headers needed to build pillow, httptools, uvloop C extensions.
+# Nothing from this stage ends up in the final image.
+FROM python:3.12-slim AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        gcc \
+        libjpeg-dev \
+        zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+COPY requirements.txt .
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+
+# ── Stage 2: runtime image ────────────────────────────────────────────────────
 FROM python:3.12-slim
 
-# libusb-1.0-0       — python-escpos USB access
-# fonts-dejavu-core  — monospace font for image rendering
-# curl               — HEALTHCHECK
+# libjpeg62-turbo  — Pillow JPEG support at runtime (libjpeg-dev was build-only)
+# libusb-1.0-0     — python-escpos USB access
+# fonts-dejavu-core — monospace font for image rendering
+# curl             — HEALTHCHECK
 RUN apt-get update && apt-get install -y --no-install-recommends \
+        libjpeg62-turbo \
         libusb-1.0-0 \
         fonts-dejavu-core \
         curl \
@@ -12,13 +31,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY --from=builder /install /usr/local
 
 COPY --chown=appuser:appuser printer_server.py .
 COPY --chown=appuser:appuser static/ static/
 
-# SQLite DB lives on a named volume at /app/data
 ENV DB_PATH=/app/data/messages.db
 RUN mkdir -p /app/data && chown appuser:appuser /app/data
 
