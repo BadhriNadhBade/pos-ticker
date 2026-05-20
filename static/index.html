@@ -109,9 +109,11 @@
 <div class="px-6 pb-6">
   <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
     <h2 class="font-bold text-gray-200 mb-4">Receipt Preview</h2>
-    <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+    <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
 
+      <!-- Sample data -->
       <div class="space-y-3">
+        <p class="text-xs text-gray-600 uppercase tracking-wider">Sample data</p>
         <div>
           <label class="block text-xs text-gray-500 mb-1">Name</label>
           <input id="prev_name" type="text" value="Ada Lovelace"
@@ -127,16 +129,48 @@
           <textarea id="prev_message" rows="3"
             class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-gray-500">Hello from your website! This is a test message.</textarea>
         </div>
-        <button onclick="previewReceipt()"
-          class="w-full bg-gray-100 text-gray-900 hover:bg-white py-2 rounded text-xs transition font-medium">
-          Generate Preview
-        </button>
-        <div id="previewErr" class="hidden text-gray-500 text-xs"></div>
       </div>
 
+      <!-- Format controls -->
+      <div class="space-y-3">
+        <p class="text-xs text-gray-600 uppercase tracking-wider">Format</p>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Header text</label>
+          <input id="fmt_header" type="text" placeholder="e.g. badhrinadh.com"
+            class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-gray-500">
+        </div>
+        <div class="space-y-2 pt-1">
+          <label class="flex items-center gap-2 cursor-pointer select-none">
+            <input id="fmt_show_ts"    type="checkbox" checked class="accent-gray-400">
+            <span class="text-xs text-gray-400">Show timestamp</span>
+          </label>
+          <label class="flex items-center gap-2 cursor-pointer select-none">
+            <input id="fmt_show_email" type="checkbox" checked class="accent-gray-400">
+            <span class="text-xs text-gray-400">Show email</span>
+          </label>
+          <label class="flex items-center gap-2 cursor-pointer select-none">
+            <input id="fmt_show_id"    type="checkbox" checked class="accent-gray-400">
+            <span class="text-xs text-gray-400">Show message ID</span>
+          </label>
+        </div>
+        <div class="flex gap-2 pt-1">
+          <button onclick="previewReceipt()"
+            class="flex-1 bg-gray-100 text-gray-900 hover:bg-white py-2 rounded text-xs transition font-medium">
+            Preview
+          </button>
+          <button onclick="saveReceiptFormat()"
+            class="flex-1 bg-gray-800 text-gray-300 hover:bg-gray-700 py-2 rounded text-xs transition">
+            Save format
+          </button>
+        </div>
+        <div id="fmtSaved" class="hidden text-gray-400 text-xs">Format saved.</div>
+        <div id="previewErr" class="hidden text-gray-500 text-xs break-all"></div>
+      </div>
+
+      <!-- Preview image -->
       <div class="flex items-start justify-center">
         <div id="previewContainer" class="text-gray-600 text-xs text-center py-8 w-full">
-          Enter sample data and click Generate Preview.
+          Fill in sample data and click Preview.
         </div>
       </div>
 
@@ -174,9 +208,10 @@ const SETTING_LABELS = {
   printer_host:        'Printer IP (network mode)',
   printer_port:        'Printer port (default 9100)',
   email_notifications: 'Email notifications (true|false)',
-  receipt_header:      'Receipt header text (optional)',
-  receipt_show_email:  'Show email on receipt (true|false)',
-  receipt_show_id:     'Show message ID on receipt (true|false)',
+  receipt_header:         'Receipt header text (optional)',
+  receipt_show_timestamp: 'Show timestamp on receipt (true|false)',
+  receipt_show_email:     'Show email on receipt (true|false)',
+  receipt_show_id:        'Show message ID on receipt (true|false)',
 };
 
 // ── Key persistence ──────────────────────────────────────────────────────────
@@ -250,11 +285,24 @@ async function loadSettings() {
   try {
     _currentSettings = await api('/settings');
     renderSettingsForm(_currentSettings);
+    populateFormatControls(_currentSettings);
     document.getElementById('settingsErr').classList.add('hidden');
   } catch (e) {
     document.getElementById('settingsErr').textContent = e.message;
     document.getElementById('settingsErr').classList.remove('hidden');
   }
+}
+
+function populateFormatControls(s) {
+  const h = document.getElementById('fmt_header');
+  if (h) h.value = s.receipt_header || '';
+  const boolEl = (id, key) => {
+    const el = document.getElementById(id);
+    if (el) el.checked = (s[key] ?? 'true') !== 'false';
+  };
+  boolEl('fmt_show_ts',    'receipt_show_timestamp');
+  boolEl('fmt_show_email', 'receipt_show_email');
+  boolEl('fmt_show_id',    'receipt_show_id');
 }
 
 function renderSettingsForm(s) {
@@ -387,10 +435,19 @@ function closeModal() { document.getElementById('modal').classList.add('hidden')
 
 // ── Receipt preview ───────────────────────────────────────────────────────────
 
+function _fmtFromControls() {
+  return {
+    receipt_header:         document.getElementById('fmt_header').value,
+    receipt_show_timestamp: document.getElementById('fmt_show_ts').checked    ? 'true' : 'false',
+    receipt_show_email:     document.getElementById('fmt_show_email').checked  ? 'true' : 'false',
+    receipt_show_id:        document.getElementById('fmt_show_id').checked     ? 'true' : 'false',
+  };
+}
+
 async function previewReceipt() {
-  const name    = document.getElementById('prev_name').value    || 'Ada Lovelace';
-  const email   = document.getElementById('prev_email').value   || 'ada@example.com';
-  const message = document.getElementById('prev_message').value || 'Hello!';
+  const name      = document.getElementById('prev_name').value    || 'Ada Lovelace';
+  const email     = document.getElementById('prev_email').value   || 'ada@example.com';
+  const message   = document.getElementById('prev_message').value || 'Hello!';
   const container = document.getElementById('previewContainer');
   const errEl     = document.getElementById('previewErr');
   errEl.classList.add('hidden');
@@ -399,9 +456,12 @@ async function previewReceipt() {
     const res = await fetch('/receipt/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Admin-Key': getKey() },
-      body: JSON.stringify({ name, email, message }),
+      body: JSON.stringify({ name, email, message, fmt: _fmtFromControls() }),
     });
-    if (!res.ok) throw new Error(`${res.status}: ${await res.text().catch(() => res.statusText)}`);
+    if (!res.ok) {
+      const txt = await res.text().catch(() => res.statusText);
+      throw new Error(`${res.status}: ${txt}`);
+    }
     const blob = await res.blob();
     const url  = URL.createObjectURL(blob);
     const old  = container.querySelector('img');
@@ -409,10 +469,26 @@ async function previewReceipt() {
     container.innerHTML = `
       <img src="${url}" alt="Receipt preview"
            class="border border-gray-700 shadow-lg rounded bg-white"
-           style="width: min(384px, 100%); height: auto; display: block; margin: 0 auto; image-rendering: pixelated;">
+           style="width: min(384px, 100%); height: auto; display: block; margin: 0 auto; image-rendering: pixelated;"
+           onerror="document.getElementById('previewErr').textContent='Image failed to render — check server logs'; document.getElementById('previewErr').classList.remove('hidden'); this.remove();">
     `;
   } catch (e) {
     container.innerHTML = '';
+    errEl.textContent = e.message;
+    errEl.classList.remove('hidden');
+  }
+}
+
+async function saveReceiptFormat() {
+  const fmtSaved = document.getElementById('fmtSaved');
+  const errEl    = document.getElementById('previewErr');
+  errEl.classList.add('hidden');
+  fmtSaved.classList.add('hidden');
+  try {
+    await api('/settings', { method: 'PATCH', body: JSON.stringify({ settings: _fmtFromControls() }) });
+    fmtSaved.classList.remove('hidden');
+    setTimeout(() => fmtSaved.classList.add('hidden'), 2000);
+  } catch (e) {
     errEl.textContent = e.message;
     errEl.classList.remove('hidden');
   }

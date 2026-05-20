@@ -71,9 +71,10 @@ _DEFAULTS: dict[str, str] = {
     "printer_host":        os.environ.get("PRINTER_HOST", ""),
     "printer_port":        os.environ.get("PRINTER_PORT", "9100"),
     "email_notifications": os.environ.get("EMAIL_NOTIFICATIONS", "true"),
-    "receipt_header":      os.environ.get("RECEIPT_HEADER", ""),
-    "receipt_show_email":  os.environ.get("RECEIPT_SHOW_EMAIL", "true"),
-    "receipt_show_id":     os.environ.get("RECEIPT_SHOW_ID", "true"),
+    "receipt_header":         os.environ.get("RECEIPT_HEADER", ""),
+    "receipt_show_timestamp": os.environ.get("RECEIPT_SHOW_TIMESTAMP", "true"),
+    "receipt_show_email":     os.environ.get("RECEIPT_SHOW_EMAIL", "true"),
+    "receipt_show_id":        os.environ.get("RECEIPT_SHOW_ID", "true"),
 }
 
 _cfg: dict[str, str] = {}
@@ -351,16 +352,24 @@ def _render_message_image(text: str, font_size: int = 22) -> Image.Image:
     return img.convert("L").point(lambda x: 0 if x < 200 else 255).convert("1")
 
 
-def _render_receipt_preview(name: str, email: str, message: str, ts: str = "") -> Image.Image:
+def _bool_fmt(val, setting_key: str) -> bool:
+    if val is not None:
+        return str(val).lower() != "false"
+    return setting(setting_key).lower() != "false"
+
+
+def _render_receipt_preview(name: str, email: str, message: str, ts: str = "", fmt: dict = None) -> Image.Image:
+    fmt         = fmt or {}
     lw          = _int_setting("line_width", 32)
     font_size   = 18
     font        = _load_font(font_size)
     line_h      = font_size + 8
     w           = PRINTER_WIDTH_PX
     div         = "─" * lw
-    header_text = setting("receipt_header")
-    show_email  = setting("receipt_show_email").lower() != "false"
-    show_id     = setting("receipt_show_id").lower()    != "false"
+    header_text = fmt.get("receipt_header",    setting("receipt_header"))
+    show_ts     = _bool_fmt(fmt.get("receipt_show_timestamp"), "receipt_show_timestamp")
+    show_email  = _bool_fmt(fmt.get("receipt_show_email"),     "receipt_show_email")
+    show_id     = _bool_fmt(fmt.get("receipt_show_id"),        "receipt_show_id")
 
     if not ts:
         ts = datetime.datetime.now(PACIFIC).strftime("%a  %b %-d  %-I:%M %p")
@@ -369,7 +378,8 @@ def _render_receipt_preview(name: str, email: str, message: str, ts: str = "") -
     if header_text:
         pre.append(("center", header_text[:lw]))
         pre.append(("left",   ""))
-    pre.append(("center", ts))
+    if show_ts:
+        pre.append(("center", ts))
     pre.append(("left",   div))
     pre.append(("left",   name[:lw]))
     if show_email:
@@ -425,8 +435,9 @@ def _do_print(row) -> None:
     lw          = _int_setting("line_width", 32)
     div         = "─" * lw
     header_text = setting("receipt_header")
-    show_email  = setting("receipt_show_email").lower() != "false"
-    show_id     = setting("receipt_show_id").lower()    != "false"
+    show_ts     = setting("receipt_show_timestamp").lower() != "false"
+    show_email  = setting("receipt_show_email").lower()     != "false"
+    show_id     = setting("receipt_show_id").lower()        != "false"
     p           = _get_printer()
     try:
         ts      = row["browser_time"] or _utc_to_pacific(row["received_at"])
@@ -439,9 +450,10 @@ def _do_print(row) -> None:
             p.text(header_text[:lw] + "\n\n")
             p.set(bold=False)
 
-        p.set(align="center", bold=True)
-        p.text("\n" + ts + "\n")
-        p.set(bold=False, align="left")
+        if show_ts:
+            p.set(align="center", bold=True)
+            p.text("\n" + ts + "\n")
+            p.set(bold=False, align="left")
         p.text(div + "\n")
 
         p.text(name[:lw] + "\n")
@@ -633,8 +645,13 @@ async def receipt_preview(request: Request):
     email   = (data.get("email",   "ada@example.com") or "ada@example.com").strip()[:64]
     message = (data.get("message", "Hello from your website!") or "Hello!").strip()[:150]
     ts      = (data.get("browser_time", "") or "").strip()
-    img     = _render_receipt_preview(name, email, message, ts)
-    buf     = io.BytesIO()
+    fmt     = data.get("fmt") or {}
+    try:
+        img = _render_receipt_preview(name, email, message, ts, fmt)
+    except Exception as exc:
+        logger.error("receipt preview render failed: %s", exc)
+        raise HTTPException(500, f"Render failed: {exc}")
+    buf = io.BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)
     return Response(content=buf.getvalue(), media_type="image/png")
