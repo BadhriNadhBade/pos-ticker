@@ -627,11 +627,38 @@ async def drain():
     return {"queued_to_print": len(pending)}
 
 
+@app.post("/print/{msg_id}", dependencies=[Depends(require_admin)])
+async def print_message(msg_id: int):
+    with get_db() as c:
+        row = c.execute(
+            "SELECT * FROM messages WHERE id=? AND printed_at IS NULL AND claimed=0",
+            (msg_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "message not found or already printed/claimed")
+        c.execute("UPDATE messages SET claimed=1 WHERE id=?", (msg_id,))
+    _queue_gauge.inc()
+    _print_queue.put((msg_id, row))
+    return {"queued": True}
+
+
+@app.post("/skip/{msg_id}", dependencies=[Depends(require_admin)])
+async def skip_message(msg_id: int):
+    with get_db() as c:
+        affected = c.execute(
+            "UPDATE messages SET claimed=2 WHERE id=? AND printed_at IS NULL AND claimed=0",
+            (msg_id,),
+        ).rowcount
+    if not affected:
+        raise HTTPException(404, "message not found or already printed/claimed")
+    return {"skipped": True}
+
+
 @app.get("/messages", dependencies=[Depends(require_admin)])
 async def list_messages(limit: int = 50, offset: int = 0):
     with get_db() as c:
         rows = c.execute(
-            "SELECT id, name, email, message, ip, received_at, browser_time, printed_at, headers"
+            "SELECT id, name, email, message, ip, received_at, browser_time, printed_at, headers, claimed"
             " FROM messages ORDER BY received_at DESC LIMIT ? OFFSET ?",
             (limit, offset),
         ).fetchall()
