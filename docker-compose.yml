@@ -2,7 +2,7 @@ services:
 
   # ── Thermal printer API + admin UI ─────────────────────────────────────────
   printer:
-    image: ghcr.io/badhrinadhbade/pos-ticker:latest
+    image: ghcr.io/badhrinadhbade/pos-ticker:main
     # To build from source instead, comment out image: above and uncomment:
     # build: .
     restart: unless-stopped
