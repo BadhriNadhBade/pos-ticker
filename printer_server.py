@@ -666,7 +666,7 @@ async def contact(request: Request):
 
     name         = (data.get("name",         "") or "").strip()[:64]
     email        = (data.get("email",        "") or "").strip()[:64]
-    message      = (data.get("message",      "") or "").strip()[:150]
+    message      = (data.get("message",      "") or "").strip()[:500]
     browser_time = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', (data.get("browser_time", "") or "").strip())[:64]
 
     if not (name and email and message):
