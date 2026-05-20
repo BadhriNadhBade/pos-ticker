@@ -278,7 +278,7 @@ async function loadHealth() {
     const h = await fetch('/health').then(r => r.json());
     const dot  = document.getElementById('healthDot');
     const psta = document.getElementById('printerStatus');
-    dot.innerHTML = `<span class="w-2 h-2 rounded-full bg-gray-300 inline-block"></span><span class="text-gray-300">healthy</span>`;
+    dot.innerHTML = `<span class="w-2 h-2 rounded-full bg-green-400 inline-block"></span><span class="text-green-400">healthy</span>`;
     psta.textContent = `printer: ${h.printer}`;
   } catch {
     const dot = document.getElementById('healthDot');
