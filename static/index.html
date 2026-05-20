@@ -139,6 +139,27 @@
           <input id="fmt_header" type="text" placeholder="e.g. badhrinadh.com"
             class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-gray-500">
         </div>
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Font</label>
+            <select id="fmt_font"
+              class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-gray-500">
+              <option value="mono">Monospace</option>
+              <option value="sans">Sans-serif</option>
+              <option value="serif">Serif</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Size</label>
+            <select id="fmt_font_size"
+              class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-gray-500">
+              <option value="14">Small</option>
+              <option value="18">Medium</option>
+              <option value="22">Large</option>
+              <option value="26">X-Large</option>
+            </select>
+          </div>
+        </div>
         <div class="space-y-2 pt-1">
           <label class="flex items-center gap-2 cursor-pointer select-none">
             <input id="fmt_show_ts"    type="checkbox" checked class="accent-gray-400">
@@ -209,6 +230,8 @@ const SETTING_LABELS = {
   printer_port:        'Printer port (default 9100)',
   email_notifications: 'Email notifications (true|false)',
   receipt_header:         'Receipt header text (optional)',
+  receipt_font:           'Receipt font  (mono|sans|serif)',
+  receipt_font_size:      'Receipt font size (px)',
   receipt_show_timestamp: 'Show timestamp on receipt (true|false)',
   receipt_show_email:     'Show email on receipt (true|false)',
   receipt_show_id:        'Show message ID on receipt (true|false)',
@@ -296,6 +319,10 @@ async function loadSettings() {
 function populateFormatControls(s) {
   const h = document.getElementById('fmt_header');
   if (h) h.value = s.receipt_header || '';
+  const font = document.getElementById('fmt_font');
+  if (font) font.value = s.receipt_font || 'mono';
+  const fontSize = document.getElementById('fmt_font_size');
+  if (fontSize) fontSize.value = s.receipt_font_size || '18';
   const boolEl = (id, key) => {
     const el = document.getElementById(id);
     if (el) el.checked = (s[key] ?? 'true') !== 'false';
@@ -438,6 +465,8 @@ function closeModal() { document.getElementById('modal').classList.add('hidden')
 function _fmtFromControls() {
   return {
     receipt_header:         document.getElementById('fmt_header').value,
+    receipt_font:           document.getElementById('fmt_font').value,
+    receipt_font_size:      document.getElementById('fmt_font_size').value,
     receipt_show_timestamp: document.getElementById('fmt_show_ts').checked    ? 'true' : 'false',
     receipt_show_email:     document.getElementById('fmt_show_email').checked  ? 'true' : 'false',
     receipt_show_id:        document.getElementById('fmt_show_id').checked     ? 'true' : 'false',
