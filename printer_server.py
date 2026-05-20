@@ -20,7 +20,7 @@ Optional env (override runtime-editable defaults):
 """
 
 from contextlib import asynccontextmanager, contextmanager
-import datetime, io, logging, os, queue, re, sqlite3, smtplib, ssl, threading
+import datetime, io, json, logging, os, queue, re, sqlite3, smtplib, ssl, threading, unicodedata
 from email.mime.text import MIMEText
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -179,6 +179,7 @@ async def cors(request: Request, call_next):
     response.headers["X-Frame-Options"]              = "DENY"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
+        "img-src 'self' blob:; "
         "script-src 'self' https://cdn.tailwindcss.com 'unsafe-inline'; "
         "style-src 'self' 'unsafe-inline'"
     )
@@ -228,6 +229,10 @@ def _init_db():
         """)
         try:
             c.execute("ALTER TABLE messages ADD COLUMN browser_time TEXT")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            c.execute("ALTER TABLE messages ADD COLUMN headers TEXT")
         except sqlite3.OperationalError:
             pass
 
@@ -306,6 +311,22 @@ def _is_ascii(text: str) -> bool:
         return False
 
 
+def _visual_len(text: str) -> int:
+    """Character count weighted by East Asian width (wide/fullwidth = 2, others = 1)."""
+    return sum(2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1 for ch in text)
+
+
+def _truncate_to_width(text: str, max_width: int) -> str:
+    """Truncate text so its visual width does not exceed max_width."""
+    w = 0
+    for i, ch in enumerate(text):
+        cw = 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+        if w + cw > max_width:
+            return text[:i]
+        w += cw
+    return text
+
+
 def _wrap_text(text: str, width: int) -> list[str]:
     lines: list[str] = []
     for paragraph in (text or "").split("\n"):
@@ -315,7 +336,7 @@ def _wrap_text(text: str, width: int) -> list[str]:
         words, line = paragraph.split(), ""
         for word in words:
             candidate = (line + " " + word).strip()
-            if len(candidate) > width:
+            if _visual_len(candidate) > width:
                 if line:
                     lines.append(line)
                 line = word
@@ -338,7 +359,7 @@ def _render_message_image(text: str, font_size: int = 22, font_path: str = None)
         words, line = paragraph.split(), ""
         for word in words:
             candidate = (line + " " + word).strip()
-            if len(candidate) > cpl:
+            if _visual_len(candidate) > cpl:
                 if line:
                     lines.append(line)
                 line = word
@@ -389,14 +410,14 @@ def _render_receipt_preview(name: str, email: str, message: str, ts: str = "", f
 
     pre: list[tuple[str, str]] = []
     if header_text:
-        pre.append(("center", header_text[:lw]))
+        pre.append(("center", _truncate_to_width(header_text, lw)))
         pre.append(("left",   ""))
     if show_ts:
         pre.append(("center", ts))
     pre.append(("left",   div))
-    pre.append(("left",   name[:lw]))
+    pre.append(("left",   _truncate_to_width(name, lw)))
     if show_email:
-        pre.append(("left", email[:lw]))
+        pre.append(("left", _truncate_to_width(email, lw)))
     pre.append(("left", div))
 
     post: list[tuple[str, str]] = [("left", div)]
@@ -460,7 +481,7 @@ def _do_print(row) -> None:
 
         if header_text:
             p.set(align="center", bold=True)
-            p.text(header_text[:lw] + "\n\n")
+            p.text(_truncate_to_width(header_text, lw) + "\n\n")
             p.set(bold=False)
 
         if show_ts:
@@ -469,9 +490,9 @@ def _do_print(row) -> None:
             p.set(bold=False, align="left")
         p.text(div + "\n")
 
-        p.text(name[:lw] + "\n")
+        p.text(_truncate_to_width(name, lw) + "\n")
         if show_email:
-            p.text(email[:lw] + "\n")
+            p.text(_truncate_to_width(email, lw) + "\n")
         p.text(div + "\n")
 
         p.image(_render_message_image(
@@ -610,7 +631,7 @@ async def drain():
 async def list_messages(limit: int = 50, offset: int = 0):
     with get_db() as c:
         rows = c.execute(
-            "SELECT id, name, email, message, ip, received_at, browser_time, printed_at"
+            "SELECT id, name, email, message, ip, received_at, browser_time, printed_at, headers"
             " FROM messages ORDER BY received_at DESC LIMIT ? OFFSET ?",
             (limit, offset),
         ).fetchall()
@@ -706,6 +727,7 @@ async def contact(request: Request):
     else:
         ip = request.client.host if request.client else "unknown"
     ua        = request.headers.get("User-Agent", "unknown")[:120]
+    headers   = json.dumps(dict(request.headers))
     timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     max_ip    = _int_setting("max_per_ip_hour", 3)
     limit     = _int_setting("prints_per_hour", 10)
@@ -716,9 +738,9 @@ async def contact(request: Request):
             return JSONResponse({"error": "too many requests"}, status_code=429)
 
         cursor = c.execute(
-            "INSERT INTO messages (name,email,message,ip,user_agent,received_at,browser_time)"
-            " VALUES (?,?,?,?,?,?,?)",
-            (name, email, message, ip, ua, timestamp, browser_time or None),
+            "INSERT INTO messages (name,email,message,ip,user_agent,received_at,browser_time,headers)"
+            " VALUES (?,?,?,?,?,?,?,?)",
+            (name, email, message, ip, ua, timestamp, browser_time or None, headers),
         )
         msg_id     = cursor.lastrowid
         hour_count = _prints_this_hour(c)
