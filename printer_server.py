@@ -20,7 +20,7 @@ Optional env (override runtime-editable defaults):
 """
 
 from contextlib import asynccontextmanager, contextmanager
-import datetime, logging, os, queue, re, sqlite3, smtplib, ssl, threading
+import datetime, io, logging, os, queue, re, sqlite3, smtplib, ssl, threading
 from email.mime.text import MIMEText
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -30,7 +30,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 from escpos.printer import Usb, Network
-from PIL import Image, ImageFont
+from PIL import Image, ImageDraw, ImageFont
 from pilmoji import Pilmoji
 from prometheus_fastapi_instrumentator import Instrumentator
 from prometheus_client import Counter, Gauge
@@ -71,6 +71,9 @@ _DEFAULTS: dict[str, str] = {
     "printer_host":        os.environ.get("PRINTER_HOST", ""),
     "printer_port":        os.environ.get("PRINTER_PORT", "9100"),
     "email_notifications": os.environ.get("EMAIL_NOTIFICATIONS", "true"),
+    "receipt_header":      os.environ.get("RECEIPT_HEADER", ""),
+    "receipt_show_email":  os.environ.get("RECEIPT_SHOW_EMAIL", "true"),
+    "receipt_show_id":     os.environ.get("RECEIPT_SHOW_ID", "true"),
 }
 
 _cfg: dict[str, str] = {}
@@ -348,6 +351,67 @@ def _render_message_image(text: str, font_size: int = 22) -> Image.Image:
     return img.convert("L").point(lambda x: 0 if x < 200 else 255).convert("1")
 
 
+def _render_receipt_preview(name: str, email: str, message: str, ts: str = "") -> Image.Image:
+    lw          = _int_setting("line_width", 32)
+    font_size   = 18
+    font        = _load_font(font_size)
+    line_h      = font_size + 8
+    w           = PRINTER_WIDTH_PX
+    div         = "─" * lw
+    header_text = setting("receipt_header")
+    show_email  = setting("receipt_show_email").lower() != "false"
+    show_id     = setting("receipt_show_id").lower()    != "false"
+
+    if not ts:
+        ts = datetime.datetime.now(PACIFIC).strftime("%a  %b %-d  %-I:%M %p")
+
+    pre: list[tuple[str, str]] = []
+    if header_text:
+        pre.append(("center", header_text[:lw]))
+        pre.append(("left",   ""))
+    pre.append(("center", ts))
+    pre.append(("left",   div))
+    pre.append(("left",   name[:lw]))
+    if show_email:
+        pre.append(("left", email[:lw]))
+    pre.append(("left", div))
+
+    post: list[tuple[str, str]] = [("left", div)]
+    if show_id:
+        post.append(("center", "#1  (preview)"))
+
+    msg_img = _render_message_image(message)
+    total_h = (len(pre) + len(post)) * line_h + msg_img.height + line_h
+    img     = Image.new("RGB", (w, total_h), "white")
+    draw    = ImageDraw.Draw(img)
+
+    y = 0
+    for align, text in pre:
+        try:
+            bbox = font.getbbox(text)
+            tw   = bbox[2] - bbox[0]
+        except Exception:
+            tw = len(text) * (font_size // 2)
+        x = max(0, (w - tw) // 2) if align == "center" else 4
+        draw.text((x, y), text, fill="black", font=font)
+        y += line_h
+
+    img.paste(msg_img.convert("RGB"), (0, y))
+    y += msg_img.height
+
+    for align, text in post:
+        try:
+            bbox = font.getbbox(text)
+            tw   = bbox[2] - bbox[0]
+        except Exception:
+            tw = len(text) * (font_size // 2)
+        x = max(0, (w - tw) // 2) if align == "center" else 4
+        draw.text((x, y), text, fill="black", font=font)
+        y += line_h
+
+    return img
+
+
 def _utc_to_pacific(utc_str: str) -> str:
     try:
         dt = datetime.datetime.strptime(utc_str, "%Y-%m-%d %H:%M:%S")
@@ -358,14 +422,22 @@ def _utc_to_pacific(utc_str: str) -> str:
 
 
 def _do_print(row) -> None:
-    lw  = _int_setting("line_width", 32)
-    div = "─" * lw
-    p   = _get_printer()
+    lw          = _int_setting("line_width", 32)
+    div         = "─" * lw
+    header_text = setting("receipt_header")
+    show_email  = setting("receipt_show_email").lower() != "false"
+    show_id     = setting("receipt_show_id").lower()    != "false"
+    p           = _get_printer()
     try:
         ts      = row["browser_time"] or _utc_to_pacific(row["received_at"])
         name    = row["name"]
         email   = row["email"]
         message = row["message"]
+
+        if header_text:
+            p.set(align="center", bold=True)
+            p.text(header_text[:lw] + "\n\n")
+            p.set(bold=False)
 
         p.set(align="center", bold=True)
         p.text("\n" + ts + "\n")
@@ -373,15 +445,17 @@ def _do_print(row) -> None:
         p.text(div + "\n")
 
         p.text(name[:lw] + "\n")
-        p.text(email[:lw] + "\n")
+        if show_email:
+            p.text(email[:lw] + "\n")
         p.text(div + "\n")
 
         p.image(_render_message_image(message))
 
         p.text(div + "\n")
-        p.set(align="center", font="b")
-        p.text(f"#{row['id']}\n")
-        p.set(font="a", align="left")
+        if show_id:
+            p.set(align="center", font="b")
+            p.text(f"#{row['id']}\n")
+            p.set(font="a", align="left")
         p.ln(1)
         p.cut()
     finally:
@@ -550,6 +624,20 @@ async def patch_settings(body: SettingsPatch):
     _reload_cfg()
     with _cfg_lock:
         return dict(_cfg)
+
+
+@app.post("/receipt/preview", dependencies=[Depends(require_admin)])
+async def receipt_preview(request: Request):
+    data    = await request.json()
+    name    = (data.get("name",    "Ada Lovelace")    or "Ada Lovelace").strip()[:64]
+    email   = (data.get("email",   "ada@example.com") or "ada@example.com").strip()[:64]
+    message = (data.get("message", "Hello from your website!") or "Hello!").strip()[:150]
+    ts      = (data.get("browser_time", "") or "").strip()
+    img     = _render_receipt_preview(name, email, message, ts)
+    buf     = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return Response(content=buf.getvalue(), media_type="image/png")
 
 
 @app.post("/contact")
