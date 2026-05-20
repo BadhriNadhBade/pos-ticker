@@ -72,6 +72,8 @@ _DEFAULTS: dict[str, str] = {
     "printer_port":        os.environ.get("PRINTER_PORT", "9100"),
     "email_notifications": os.environ.get("EMAIL_NOTIFICATIONS", "true"),
     "receipt_header":         os.environ.get("RECEIPT_HEADER", ""),
+    "receipt_font":           os.environ.get("RECEIPT_FONT", "mono"),
+    "receipt_font_size":      os.environ.get("RECEIPT_FONT_SIZE", "18"),
     "receipt_show_timestamp": os.environ.get("RECEIPT_SHOW_TIMESTAMP", "true"),
     "receipt_show_email":     os.environ.get("RECEIPT_SHOW_EMAIL", "true"),
     "receipt_show_id":        os.environ.get("RECEIPT_SHOW_ID", "true"),
@@ -324,8 +326,11 @@ def _wrap_text(text: str, width: int) -> list[str]:
     return lines or [""]
 
 
-def _render_message_image(text: str, font_size: int = 22) -> Image.Image:
-    font        = _load_font(font_size)
+def _render_message_image(text: str, font_size: int = 22, font_path: str = None) -> Image.Image:
+    try:
+        font = ImageFont.truetype(font_path, font_size) if font_path else _load_font(font_size)
+    except Exception:
+        font = _load_font(font_size)
     line_height = font_size + 8  # extra clearance for emoji descenders
     cpl         = max(20, int(PRINTER_WIDTH_PX / (font_size * 0.6)))
     lines: list[str] = []
@@ -361,8 +366,16 @@ def _bool_fmt(val, setting_key: str) -> bool:
 def _render_receipt_preview(name: str, email: str, message: str, ts: str = "", fmt: dict = None) -> Image.Image:
     fmt         = fmt or {}
     lw          = _int_setting("line_width", 32)
-    font_size   = 18
-    font        = _load_font(font_size)
+    try:
+        font_size = max(10, min(40, int(fmt.get("receipt_font_size") or setting("receipt_font_size") or 18)))
+    except (ValueError, TypeError):
+        font_size = 18
+    font_key    = fmt.get("receipt_font") or setting("receipt_font") or "mono"
+    font_path   = _RECEIPT_FONTS.get(font_key)
+    try:
+        font = ImageFont.truetype(font_path, font_size) if font_path else _load_font(font_size)
+    except Exception:
+        font = _load_font(font_size)
     line_h      = font_size + 8
     w           = PRINTER_WIDTH_PX
     div         = "─" * lw
@@ -390,7 +403,7 @@ def _render_receipt_preview(name: str, email: str, message: str, ts: str = "", f
     if show_id:
         post.append(("center", "#1  (preview)"))
 
-    msg_img = _render_message_image(message)
+    msg_img = _render_message_image(message, font_size=font_size, font_path=font_path)
     total_h = (len(pre) + len(post)) * line_h + msg_img.height + line_h
     img     = Image.new("RGB", (w, total_h), "white")
     draw    = ImageDraw.Draw(img)
@@ -461,7 +474,11 @@ def _do_print(row) -> None:
             p.text(email[:lw] + "\n")
         p.text(div + "\n")
 
-        p.image(_render_message_image(message))
+        p.image(_render_message_image(
+            message,
+            font_size=_int_setting("receipt_font_size", 22),
+            font_path=_RECEIPT_FONTS.get(setting("receipt_font")),
+        ))
 
         p.text(div + "\n")
         if show_id:
@@ -611,7 +628,13 @@ class SettingsPatch(BaseModel):
     settings: dict[str, str]
 
 
-_INT_SETTINGS = {"prints_per_hour", "max_per_ip_hour", "line_width", "printer_port"}
+_INT_SETTINGS = {"prints_per_hour", "max_per_ip_hour", "line_width", "printer_port", "receipt_font_size"}
+
+_RECEIPT_FONTS = {
+    "mono":  "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+    "sans":  "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "serif": "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+}
 
 
 @app.patch("/settings", dependencies=[Depends(require_admin)])
@@ -666,7 +689,7 @@ async def contact(request: Request):
 
     name         = (data.get("name",         "") or "").strip()[:64]
     email        = (data.get("email",        "") or "").strip()[:64]
-    message      = (data.get("message",      "") or "").strip()[:150]
+    message      = (data.get("message",      "") or "").strip()[:500]
     browser_time = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', (data.get("browser_time", "") or "").strip())[:64]
 
     if not (name and email and message):
