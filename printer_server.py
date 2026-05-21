@@ -20,12 +20,12 @@ Optional env (override runtime-editable defaults):
 """
 
 from contextlib import asynccontextmanager, contextmanager
-import datetime, io, json, logging, os, queue, re, sqlite3, smtplib, ssl, threading, unicodedata
+import base64, datetime, io, json, logging, os, queue, re, sqlite3, smtplib, ssl, threading, unicodedata
 from email.mime.text import MIMEText
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, Depends, HTTPException, Request
+from fastapi import FastAPI, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
@@ -77,6 +77,8 @@ _DEFAULTS: dict[str, str] = {
     "receipt_show_timestamp": os.environ.get("RECEIPT_SHOW_TIMESTAMP", "true"),
     "receipt_show_email":     os.environ.get("RECEIPT_SHOW_EMAIL", "true"),
     "receipt_show_id":        os.environ.get("RECEIPT_SHOW_ID", "true"),
+    "receipt_title":          os.environ.get("RECEIPT_TITLE", ""),
+    "receipt_footer":         os.environ.get("RECEIPT_FOOTER", ""),
 }
 
 _cfg: dict[str, str] = {}
@@ -378,10 +380,33 @@ def _render_message_image(text: str, font_size: int = 22, font_path: str = None)
     return img.convert("L").point(lambda x: 0 if x < 200 else 255).convert("1")
 
 
+def _load_logo() -> "Image.Image | None":
+    b64 = setting("receipt_logo")
+    if not b64:
+        return None
+    try:
+        data = base64.b64decode(b64)
+        img  = Image.open(io.BytesIO(data)).convert("RGB")
+        logo_h = max(1, int(PRINTER_WIDTH_PX * img.height / img.width))
+        return img.resize((PRINTER_WIDTH_PX, logo_h), Image.LANCZOS)
+    except Exception:
+        return None
+
+
 def _bool_fmt(val, setting_key: str) -> bool:
     if val is not None:
         return str(val).lower() != "false"
     return setting(setting_key).lower() != "false"
+
+
+def _draw_text_line(draw, font, text: str, y: int, align: str, w: int, font_size: int) -> None:
+    try:
+        bbox = font.getbbox(text)
+        tw   = bbox[2] - bbox[0]
+    except Exception:
+        tw = len(text) * (font_size // 2)
+    x = max(0, (w - tw) // 2) if align == "center" else 4
+    draw.text((x, y), text, fill="black", font=font)
 
 
 def _render_receipt_preview(name: str, email: str, message: str, ts: str = "", fmt: dict = None) -> Image.Image:
@@ -400,10 +425,22 @@ def _render_receipt_preview(name: str, email: str, message: str, ts: str = "", f
     line_h      = font_size + 8
     w           = PRINTER_WIDTH_PX
     div         = "─" * lw
+
+    title_text  = (fmt.get("receipt_title")  or setting("receipt_title") or "").strip()
+    footer_text = (fmt.get("receipt_footer") or setting("receipt_footer") or "").strip()
     header_text = fmt.get("receipt_header",    setting("receipt_header"))
     show_ts     = _bool_fmt(fmt.get("receipt_show_timestamp"), "receipt_show_timestamp")
     show_email  = _bool_fmt(fmt.get("receipt_show_email"),     "receipt_show_email")
     show_id     = _bool_fmt(fmt.get("receipt_show_id"),        "receipt_show_id")
+
+    title_size  = min(font_size * 2, 48)
+    title_line_h = title_size + 8
+    try:
+        title_font = ImageFont.truetype(font_path, title_size) if font_path else _load_font(title_size)
+    except Exception:
+        title_font = _load_font(title_size)
+
+    logo_img = _load_logo()
 
     if not ts:
         ts = datetime.datetime.now(PACIFIC).strftime("%a  %b %-d  %-I:%M %p")
@@ -423,34 +460,39 @@ def _render_receipt_preview(name: str, email: str, message: str, ts: str = "", f
     post: list[tuple[str, str]] = [("left", div)]
     if show_id:
         post.append(("center", "#1  (preview)"))
+    if footer_text:
+        post.append(("left", ""))
+        for line in _wrap_text(footer_text, lw):
+            post.append(("center", line))
 
     msg_img = _render_message_image(message, font_size=font_size, font_path=font_path)
     total_h = (len(pre) + len(post)) * line_h + msg_img.height + line_h
-    img     = Image.new("RGB", (w, total_h), "white")
-    draw    = ImageDraw.Draw(img)
+    if logo_img:
+        total_h += logo_img.height
+    if title_text:
+        total_h += title_line_h + line_h
 
-    y = 0
+    img  = Image.new("RGB", (w, total_h), "white")
+    draw = ImageDraw.Draw(img)
+    y    = 0
+
+    if logo_img:
+        img.paste(logo_img, (0, y))
+        y += logo_img.height
+
+    if title_text:
+        _draw_text_line(draw, title_font, _truncate_to_width(title_text, lw // 2), y, "center", w, title_size)
+        y += title_line_h + line_h
+
     for align, text in pre:
-        try:
-            bbox = font.getbbox(text)
-            tw   = bbox[2] - bbox[0]
-        except Exception:
-            tw = len(text) * (font_size // 2)
-        x = max(0, (w - tw) // 2) if align == "center" else 4
-        draw.text((x, y), text, fill="black", font=font)
+        _draw_text_line(draw, font, text, y, align, w, font_size)
         y += line_h
 
     img.paste(msg_img.convert("RGB"), (0, y))
     y += msg_img.height
 
     for align, text in post:
-        try:
-            bbox = font.getbbox(text)
-            tw   = bbox[2] - bbox[0]
-        except Exception:
-            tw = len(text) * (font_size // 2)
-        x = max(0, (w - tw) // 2) if align == "center" else 4
-        draw.text((x, y), text, fill="black", font=font)
+        _draw_text_line(draw, font, text, y, align, w, font_size)
         y += line_h
 
     return img
@@ -468,16 +510,28 @@ def _utc_to_pacific(utc_str: str) -> str:
 def _do_print(row) -> None:
     lw          = _int_setting("line_width", 32)
     div         = "─" * lw
+    title_text  = setting("receipt_title").strip()
     header_text = setting("receipt_header")
+    footer_text = setting("receipt_footer").strip()
     show_ts     = setting("receipt_show_timestamp").lower() != "false"
     show_email  = setting("receipt_show_email").lower()     != "false"
     show_id     = setting("receipt_show_id").lower()        != "false"
+    logo        = _load_logo()
     p           = _get_printer()
     try:
         ts      = row["browser_time"] or _utc_to_pacific(row["received_at"])
         name    = row["name"]
         email   = row["email"]
         message = row["message"]
+
+        if logo:
+            p.image(logo.convert("L").point(lambda x: 0 if x < 128 else 255).convert("1"))
+            p.ln(1)
+
+        if title_text:
+            p.set(align="center", double_width=True, double_height=True, bold=True)
+            p.text(_truncate_to_width(title_text, lw // 2) + "\n\n")
+            p.set(double_width=False, double_height=False, bold=False, align="left")
 
         if header_text:
             p.set(align="center", bold=True)
@@ -506,6 +560,12 @@ def _do_print(row) -> None:
             p.set(align="center", font="b")
             p.text(f"#{row['id']}\n")
             p.set(font="a", align="left")
+        if footer_text:
+            p.ln(1)
+            p.set(align="center")
+            for line in _wrap_text(footer_text, lw):
+                p.text(line + "\n")
+            p.set(align="left")
         p.ln(1)
         p.cut()
     finally:
@@ -669,7 +729,9 @@ async def list_messages(limit: int = 50, offset: int = 0):
 @app.get("/settings", dependencies=[Depends(require_admin)])
 async def get_settings():
     with _cfg_lock:
-        return dict(_cfg)
+        result = {k: v for k, v in _cfg.items() if k != "receipt_logo"}
+        result["receipt_logo_set"] = bool(_cfg.get("receipt_logo"))
+    return result
 
 
 class SettingsPatch(BaseModel):
@@ -706,7 +768,54 @@ async def patch_settings(body: SettingsPatch):
             )
     _reload_cfg()
     with _cfg_lock:
-        return dict(_cfg)
+        result = {k: v for k, v in _cfg.items() if k != "receipt_logo"}
+        result["receipt_logo_set"] = bool(_cfg.get("receipt_logo"))
+    return result
+
+
+_LOGO_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
+
+
+@app.post("/settings/logo", dependencies=[Depends(require_admin)])
+async def upload_logo(file: UploadFile = File(...)):
+    data = await file.read(_LOGO_MAX_BYTES + 1)
+    if len(data) > _LOGO_MAX_BYTES:
+        raise HTTPException(400, "Image too large (max 5 MB)")
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.verify()
+    except Exception:
+        raise HTTPException(400, "Invalid image file")
+    img = Image.open(io.BytesIO(data)).convert("RGB")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    b64 = base64.b64encode(buf.getvalue()).decode()
+    now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    with get_db() as c:
+        c.execute(
+            "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)"
+            " ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+            ("receipt_logo", b64, now),
+        )
+    _reload_cfg()
+    return {"ok": True}
+
+
+@app.delete("/settings/logo", dependencies=[Depends(require_admin)])
+async def delete_logo():
+    with get_db() as c:
+        c.execute("DELETE FROM settings WHERE key='receipt_logo'")
+    _reload_cfg()
+    return {"ok": True}
+
+
+@app.get("/settings/logo", dependencies=[Depends(require_admin)])
+async def get_logo():
+    b64 = setting("receipt_logo")
+    if not b64:
+        raise HTTPException(404, "no logo set")
+    data = base64.b64decode(b64)
+    return Response(content=data, media_type="image/png")
 
 
 @app.post("/receipt/preview", dependencies=[Depends(require_admin)])

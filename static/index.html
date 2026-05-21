@@ -135,8 +135,32 @@
       <div class="space-y-3">
         <p class="text-xs text-gray-600 uppercase tracking-wider">Format</p>
         <div>
-          <label class="block text-xs text-gray-500 mb-1">Header text</label>
+          <label class="block text-xs text-gray-500 mb-1">Logo image</label>
+          <div class="flex gap-2 items-center flex-wrap">
+            <input id="logoFile" type="file" accept="image/*" class="hidden" onchange="uploadLogo(this)">
+            <button onclick="document.getElementById('logoFile').click()"
+              class="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded text-xs transition">Upload</button>
+            <button onclick="removeLogo()"
+              class="px-2 py-1 bg-gray-800 hover:bg-gray-700 text-gray-500 hover:text-gray-400 rounded text-xs transition">Remove</button>
+            <span id="logoStatus" class="text-xs text-gray-600"></span>
+          </div>
+          <div id="logoThumb" class="mt-2 hidden">
+            <img id="logoThumbImg" src="" alt="logo" class="border border-gray-700 rounded" style="max-height:48px;">
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Title (large bold)</label>
+          <input id="fmt_title" type="text" placeholder="e.g. PING"
+            class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-gray-500">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Subtitle text</label>
           <input id="fmt_header" type="text" placeholder="e.g. badhrinadh.com"
+            class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-gray-500">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Footer text</label>
+          <input id="fmt_footer" type="text" placeholder="e.g. Thanks for stopping by!"
             class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-gray-500">
         </div>
         <div class="grid grid-cols-2 gap-2">
@@ -229,7 +253,9 @@ const SETTING_LABELS = {
   printer_host:        'Printer IP (network mode)',
   printer_port:        'Printer port (default 9100)',
   email_notifications: 'Email notifications (true|false)',
-  receipt_header:         'Receipt header text (optional)',
+  receipt_title:          'Receipt title (large bold, top)',
+  receipt_header:         'Receipt subtitle text (optional)',
+  receipt_footer:         'Receipt footer text (bottom)',
   receipt_font:           'Receipt font  (mono|sans|serif)',
   receipt_font_size:      'Receipt font size (px)',
   receipt_show_timestamp: 'Show timestamp on receipt (true|false)',
@@ -317,12 +343,12 @@ async function loadSettings() {
 }
 
 function populateFormatControls(s) {
-  const h = document.getElementById('fmt_header');
-  if (h) h.value = s.receipt_header || '';
-  const font = document.getElementById('fmt_font');
-  if (font) font.value = s.receipt_font || 'mono';
-  const fontSize = document.getElementById('fmt_font_size');
-  if (fontSize) fontSize.value = s.receipt_font_size || '18';
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
+  set('fmt_title',  s.receipt_title);
+  set('fmt_header', s.receipt_header);
+  set('fmt_footer', s.receipt_footer);
+  set('fmt_font',      s.receipt_font      || 'mono');
+  set('fmt_font_size', s.receipt_font_size || '18');
   const boolEl = (id, key) => {
     const el = document.getElementById(id);
     if (el) el.checked = (s[key] ?? 'true') !== 'false';
@@ -330,6 +356,25 @@ function populateFormatControls(s) {
   boolEl('fmt_show_ts',    'receipt_show_timestamp');
   boolEl('fmt_show_email', 'receipt_show_email');
   boolEl('fmt_show_id',    'receipt_show_id');
+
+  const thumb    = document.getElementById('logoThumb');
+  const thumbImg = document.getElementById('logoThumbImg');
+  const status   = document.getElementById('logoStatus');
+  if (s.receipt_logo_set) {
+    fetch('/settings/logo', { headers: { 'X-Admin-Key': getKey() } })
+      .then(r => r.blob())
+      .then(b => {
+        const old = thumbImg.src;
+        if (old && old.startsWith('blob:')) URL.revokeObjectURL(old);
+        thumbImg.src = URL.createObjectURL(b);
+        thumb.classList.remove('hidden');
+      }).catch(() => {});
+    status.textContent = 'Logo set';
+  } else {
+    thumb.classList.add('hidden');
+    thumbImg.src = '';
+    status.textContent = '';
+  }
 }
 
 function renderSettingsForm(s) {
@@ -474,7 +519,9 @@ function closeModal() { document.getElementById('modal').classList.add('hidden')
 
 function _fmtFromControls() {
   return {
+    receipt_title:          document.getElementById('fmt_title').value,
     receipt_header:         document.getElementById('fmt_header').value,
+    receipt_footer:         document.getElementById('fmt_footer').value,
     receipt_font:           document.getElementById('fmt_font').value,
     receipt_font_size:      document.getElementById('fmt_font_size').value,
     receipt_show_timestamp: document.getElementById('fmt_show_ts').checked    ? 'true' : 'false',
@@ -530,6 +577,41 @@ async function saveReceiptFormat() {
   } catch (e) {
     errEl.textContent = e.message;
     errEl.classList.remove('hidden');
+  }
+}
+
+// ── Logo ──────────────────────────────────────────────────────────────────────
+
+async function uploadLogo(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const statusEl = document.getElementById('logoStatus');
+  statusEl.textContent = 'Uploading…';
+  const form = new FormData();
+  form.append('file', file);
+  try {
+    const res = await fetch('/settings/logo', {
+      method: 'POST',
+      headers: { 'X-Admin-Key': getKey() },
+      body: form,
+    });
+    if (!res.ok) throw new Error(`${res.status}: ${await res.text().catch(() => res.statusText)}`);
+    statusEl.textContent = 'Logo saved.';
+    await loadSettings();
+  } catch (e) {
+    statusEl.textContent = e.message;
+  }
+  input.value = '';
+}
+
+async function removeLogo() {
+  const statusEl = document.getElementById('logoStatus');
+  try {
+    await api('/settings/logo', { method: 'DELETE' });
+    statusEl.textContent = 'Logo removed.';
+    await loadSettings();
+  } catch (e) {
+    statusEl.textContent = e.message;
   }
 }
 
