@@ -444,32 +444,24 @@ def _render_receipt_preview(name: str, email: str, message: str, ts: str = "", f
     if not ts:
         ts = datetime.datetime.now(PACIFIC).strftime("%a  %b %-d  %-I:%M %p")
 
-    pre: list[tuple[str, str]] = [
+    # ("lv", label, value) → label left, value right (pixel-precise, font-size safe)
+    pre: list[tuple] = [
         ("center", _truncate_to_width(f"MESSAGE FOR {name.upper()}", lw)),
         ("left",   ""),
         ("left",   div),
         ("left",   ""),
-        ("left",   ""),
     ]
     if show_ts:
-        ts_label = "TIMESTAMP:"
-        ts_pad = " " * max(1, lw - len(ts_label) - len(ts))
-        pre.append(("left", ts_label + ts_pad + ts))
+        pre.append(("lv", "TIMESTAMP:", ts))
         pre.append(("left", ""))
     if show_email:
-        email_label = "EMAIL:"
-        email_trunc = _truncate_to_width(email, lw - len(email_label) - 1)
-        email_pad = " " * max(1, lw - len(email_label) - len(email_trunc))
-        pre.append(("left", email_label + email_pad + email_trunc))
+        pre.append(("lv", "EMAIL:", email))
         pre.append(("left", ""))
     if show_id:
-        id_label = "TRANSACTION #:"
-        id_val = "#1  (preview)"
-        id_pad = " " * max(1, lw - len(id_label) - len(id_val))
-        pre.append(("left", id_label + id_pad + id_val))
-    pre.extend([("left", ""), ("left", ""), ("left", ""), ("left", "")])
+        pre.append(("lv", "TRANSACTION #:", "#1  (preview)"))
+    pre.extend([("left", ""), ("left", "")])
 
-    post: list[tuple[str, str]] = [("left", ""), ("left", ""), ("left", ""), ("left", "")]
+    post: list[tuple] = [("left", ""), ("left", "")]
     if footer_text:
         for line in _wrap_text(footer_text, lw):
             post.append(("center", line))
@@ -492,8 +484,18 @@ def _render_receipt_preview(name: str, email: str, message: str, ts: str = "", f
     _draw_text_line(draw, title_font, _truncate_to_width(title_text, lw // 2), y, "center", w, title_size)
     y += title_line_h + 2 * line_h
 
-    for align, text in pre:
-        _draw_text_line(draw, font, text, y, align, w, font_size)
+    for entry in pre:
+        if len(entry) == 3:
+            _, label, value = entry
+            draw.text((4, y), label, fill="black", font=font)
+            try:
+                vw = font.getbbox(value)[2] - font.getbbox(value)[0]
+            except Exception:
+                vw = len(value) * (font_size // 2)
+            draw.text((w - 4 - vw, y), value, fill="black", font=font)
+        else:
+            align, text = entry
+            _draw_text_line(draw, font, text, y, align, w, font_size)
         y += line_h
 
     img.paste(msg_img.convert("RGB"), (0, y))
