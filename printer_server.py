@@ -426,9 +426,8 @@ def _render_receipt_preview(name: str, email: str, message: str, ts: str = "", f
     w           = PRINTER_WIDTH_PX
     div         = "─" * lw
 
-    title_text  = (fmt.get("receipt_title")  or setting("receipt_title") or "").strip()
+    title_text  = (fmt.get("receipt_title")  or setting("receipt_title") or "NEW MESSAGE").strip()
     footer_text = (fmt.get("receipt_footer") or setting("receipt_footer") or "").strip()
-    header_text = fmt.get("receipt_header",    setting("receipt_header"))
     show_ts     = _bool_fmt(fmt.get("receipt_show_timestamp"), "receipt_show_timestamp")
     show_email  = _bool_fmt(fmt.get("receipt_show_email"),     "receipt_show_email")
     show_id     = _bool_fmt(fmt.get("receipt_show_id"),        "receipt_show_id")
@@ -445,32 +444,41 @@ def _render_receipt_preview(name: str, email: str, message: str, ts: str = "", f
     if not ts:
         ts = datetime.datetime.now(PACIFIC).strftime("%a  %b %-d  %-I:%M %p")
 
-    pre: list[tuple[str, str]] = []
-    if header_text:
-        pre.append(("center", _truncate_to_width(header_text, lw)))
-        pre.append(("left",   ""))
+    pre: list[tuple[str, str]] = [
+        ("center", _truncate_to_width(f"MESSAGE FOR {name.upper()}", lw)),
+        ("left",   ""),
+        ("left",   div),
+        ("left",   ""),
+        ("left",   ""),
+    ]
     if show_ts:
-        pre.append(("center", ts))
-    pre.append(("left",   div))
-    pre.append(("left",   _truncate_to_width(name, lw)))
+        ts_label = "TIMESTAMP:"
+        ts_pad = " " * max(1, lw - len(ts_label) - len(ts))
+        pre.append(("left", ts_label + ts_pad + ts))
+        pre.append(("left", ""))
     if show_email:
-        pre.append(("left", _truncate_to_width(email, lw)))
-    pre.append(("left", div))
-
-    post: list[tuple[str, str]] = [("left", div)]
+        email_label = "EMAIL:"
+        email_trunc = _truncate_to_width(email, lw - len(email_label) - 1)
+        email_pad = " " * max(1, lw - len(email_label) - len(email_trunc))
+        pre.append(("left", email_label + email_pad + email_trunc))
+        pre.append(("left", ""))
     if show_id:
-        post.append(("center", "#1  (preview)"))
+        id_label = "TRANSACTION #:"
+        id_val = "#1  (preview)"
+        id_pad = " " * max(1, lw - len(id_label) - len(id_val))
+        pre.append(("left", id_label + id_pad + id_val))
+    pre.extend([("left", ""), ("left", ""), ("left", ""), ("left", "")])
+
+    post: list[tuple[str, str]] = [("left", ""), ("left", ""), ("left", ""), ("left", "")]
     if footer_text:
-        post.append(("left", ""))
         for line in _wrap_text(footer_text, lw):
             post.append(("center", line))
 
     msg_img = _render_message_image(message, font_size=font_size, font_path=font_path)
-    total_h = (len(pre) + len(post)) * line_h + msg_img.height + line_h
+    title_h = line_h + title_line_h + 2 * line_h
+    total_h = title_h + (len(pre) + len(post)) * line_h + msg_img.height
     if logo_img:
         total_h += logo_img.height
-    if title_text:
-        total_h += title_line_h + line_h
 
     img  = Image.new("RGB", (w, total_h), "white")
     draw = ImageDraw.Draw(img)
@@ -480,9 +488,9 @@ def _render_receipt_preview(name: str, email: str, message: str, ts: str = "", f
         img.paste(logo_img, (0, y))
         y += logo_img.height
 
-    if title_text:
-        _draw_text_line(draw, title_font, _truncate_to_width(title_text, lw // 2), y, "center", w, title_size)
-        y += title_line_h + line_h
+    y += line_h
+    _draw_text_line(draw, title_font, _truncate_to_width(title_text, lw // 2), y, "center", w, title_size)
+    y += title_line_h + 2 * line_h
 
     for align, text in pre:
         _draw_text_line(draw, font, text, y, align, w, font_size)
@@ -510,8 +518,7 @@ def _utc_to_pacific(utc_str: str) -> str:
 def _do_print(row) -> None:
     lw          = _int_setting("line_width", 32)
     div         = "─" * lw
-    title_text  = setting("receipt_title").strip()
-    header_text = setting("receipt_header")
+    title_text  = setting("receipt_title").strip() or "NEW MESSAGE"
     footer_text = setting("receipt_footer").strip()
     show_ts     = setting("receipt_show_timestamp").lower() != "false"
     show_email  = setting("receipt_show_email").lower()     != "false"
@@ -522,32 +529,46 @@ def _do_print(row) -> None:
         ts      = row["browser_time"] or _utc_to_pacific(row["received_at"])
         name    = row["name"]
         email   = row["email"]
+        msg_id  = row["id"]
         message = row["message"]
 
         if logo:
             p.image(logo.convert("L").point(lambda x: 0 if x < 128 else 255).convert("1"))
             p.ln(1)
 
-        if title_text:
-            p.set(align="center", double_width=True, double_height=True, bold=True)
-            p.text(_truncate_to_width(title_text, lw // 2) + "\n\n")
-            p.set(double_width=False, double_height=False, bold=False, align="left")
+        p.ln(1)
+        p.set(align="center", double_width=True, double_height=True, bold=True)
+        p.text(_truncate_to_width(title_text, lw // 2) + "\n")
+        p.set(double_width=False, double_height=False, bold=False, align="center")
+        p.ln(2)
 
-        if header_text:
-            p.set(align="center", bold=True)
-            p.text(_truncate_to_width(header_text, lw) + "\n\n")
-            p.set(bold=False)
+        p.text(_truncate_to_width(f"MESSAGE FOR {name.upper()}", lw) + "\n")
+        p.ln(1)
+
+        p.set(align="left")
+        p.text(div + "\n")
+        p.ln(2)
 
         if show_ts:
-            p.set(align="center", bold=True)
-            p.text("\n" + ts + "\n")
-            p.set(bold=False, align="left")
-        p.text(div + "\n")
+            ts_label = "TIMESTAMP:"
+            ts_pad = " " * max(1, lw - len(ts_label) - len(ts))
+            p.text(ts_label + ts_pad + ts + "\n")
+            p.ln(1)
 
-        p.text(_truncate_to_width(name, lw) + "\n")
         if show_email:
-            p.text(_truncate_to_width(email, lw) + "\n")
-        p.text(div + "\n")
+            email_label = "EMAIL:"
+            email_trunc = _truncate_to_width(email, lw - len(email_label) - 1)
+            email_pad = " " * max(1, lw - len(email_label) - len(email_trunc))
+            p.text(email_label + email_pad + email_trunc + "\n")
+            p.ln(1)
+
+        if show_id:
+            id_label = "TRANSACTION #:"
+            id_val = str(msg_id)
+            id_pad = " " * max(1, lw - len(id_label) - len(id_val))
+            p.text(id_label + id_pad + id_val + "\n")
+
+        p.ln(4)
 
         p.image(_render_message_image(
             message,
@@ -555,18 +576,14 @@ def _do_print(row) -> None:
             font_path=_RECEIPT_FONTS.get(setting("receipt_font")),
         ))
 
-        p.text(div + "\n")
-        if show_id:
-            p.set(align="center", font="b")
-            p.text(f"#{row['id']}\n")
-            p.set(font="a", align="left")
+        p.ln(4)
+
         if footer_text:
-            p.ln(1)
             p.set(align="center")
             for line in _wrap_text(footer_text, lw):
                 p.text(line + "\n")
             p.set(align="left")
-        p.ln(1)
+
         p.cut()
     finally:
         try:
