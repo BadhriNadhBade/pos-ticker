@@ -1,8 +1,6 @@
 name: Build & publish pos-ticker image
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 env:
