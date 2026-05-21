@@ -61,17 +61,17 @@ _MONO_FONTS = [
 # ── Runtime settings (stored in SQLite, editable via PATCH /settings) ────────
 
 _DEFAULTS: dict[str, str] = {
-    "prints_per_hour":        os.environ.get("PRINTS_PER_HOUR",        "10"),
-    "max_per_ip_hour":        os.environ.get("MAX_PER_IP_HOUR",        "3"),
-    "line_width":             os.environ.get("LINE_WIDTH",             "32"),
-    "allowed_origin":         os.environ.get("ALLOWED_ORIGIN",         "https://your-domain.com"),
-    "printer_mode":           os.environ.get("PRINTER_MODE",           "auto"),
-    "printer_host":           os.environ.get("PRINTER_HOST",           ""),
-    "printer_port":           os.environ.get("PRINTER_PORT",           "9100"),
-    "email_notifications":    os.environ.get("EMAIL_NOTIFICATIONS",    "true"),
-    "receipt_header":         os.environ.get("RECEIPT_HEADER",         ""),
-    "receipt_font":           os.environ.get("RECEIPT_FONT",           "serif"),
-    "receipt_font_size":      os.environ.get("RECEIPT_FONT_SIZE",      "22"),
+    "prints_per_hour":     os.environ.get("PRINTS_PER_HOUR", "10"),
+    "max_per_ip_hour":     os.environ.get("MAX_PER_IP_HOUR", "3"),
+    "line_width":          os.environ.get("LINE_WIDTH", "32"),
+    "allowed_origin":      os.environ.get("ALLOWED_ORIGIN", "https://your-domain.com"),
+    "printer_mode":        os.environ.get("PRINTER_MODE", "auto"),  # auto|usb|network
+    "printer_host":        os.environ.get("PRINTER_HOST", ""),
+    "printer_port":        os.environ.get("PRINTER_PORT", "9100"),
+    "email_notifications": os.environ.get("EMAIL_NOTIFICATIONS", "true"),
+    "receipt_header":         os.environ.get("RECEIPT_HEADER", ""),
+    "receipt_font":           os.environ.get("RECEIPT_FONT", "serif"),
+    "receipt_font_size":      os.environ.get("RECEIPT_FONT_SIZE", "22"),
     "receipt_show_timestamp": os.environ.get("RECEIPT_SHOW_TIMESTAMP", "true"),
     "receipt_show_email":     os.environ.get("RECEIPT_SHOW_EMAIL",     "true"),
     "receipt_show_id":        os.environ.get("RECEIPT_SHOW_ID",        "true"),

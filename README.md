@@ -324,12 +324,6 @@ This restricts which website can call `/contact` from a browser. Do not use `*`.
 
 ---
 
-## Contributing
-
-Bug reports, printer compatibility fixes, and documentation improvements are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to get started and [SECURITY.md](SECURITY.md) for reporting vulnerabilities privately.
-
----
-
 ## License
 
 MIT — see [LICENSE](LICENSE).
