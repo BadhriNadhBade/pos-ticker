@@ -163,6 +163,14 @@
           <input id="fmt_footer" type="text" placeholder="e.g. Thanks for stopping by!"
             class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-gray-500">
         </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Layout style</label>
+          <select id="fmt_style"
+            class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-gray-500">
+            <option value="compact">E — Compact  (name + date on one line)</option>
+            <option value="structured">F — Structured  (From / Date / Time rows)</option>
+          </select>
+        </div>
         <div class="grid grid-cols-2 gap-2">
           <div>
             <label class="block text-xs text-gray-500 mb-1">Font</label>
@@ -261,6 +269,7 @@ const SETTING_LABELS = {
   receipt_show_timestamp: 'Show timestamp on receipt (true|false)',
   receipt_show_email:     'Show email on receipt (true|false)',
   receipt_show_id:        'Show message ID on receipt (true|false)',
+  receipt_style:          'Receipt layout style  (compact|structured)',
 };
 
 // ── Key persistence ──────────────────────────────────────────────────────────
@@ -349,6 +358,7 @@ function populateFormatControls(s) {
   set('fmt_footer', s.receipt_footer);
   set('fmt_font',      s.receipt_font      || 'mono');
   set('fmt_font_size', s.receipt_font_size || '18');
+  set('fmt_style',     s.receipt_style     || 'compact');
   const boolEl = (id, key) => {
     const el = document.getElementById(id);
     if (el) el.checked = (s[key] ?? 'true') !== 'false';
@@ -527,6 +537,7 @@ function _fmtFromControls() {
     receipt_show_timestamp: document.getElementById('fmt_show_ts').checked    ? 'true' : 'false',
     receipt_show_email:     document.getElementById('fmt_show_email').checked  ? 'true' : 'false',
     receipt_show_id:        document.getElementById('fmt_show_id').checked     ? 'true' : 'false',
+    receipt_style:          document.getElementById('fmt_style').value,
   };
 }
 

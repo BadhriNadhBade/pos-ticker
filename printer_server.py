@@ -79,6 +79,7 @@ _DEFAULTS: dict[str, str] = {
     "receipt_show_id":        os.environ.get("RECEIPT_SHOW_ID", "true"),
     "receipt_title":          os.environ.get("RECEIPT_TITLE", ""),
     "receipt_footer":         os.environ.get("RECEIPT_FOOTER", ""),
+    "receipt_style":          os.environ.get("RECEIPT_STYLE", "compact"),
 }
 
 _cfg: dict[str, str] = {}
@@ -410,100 +411,141 @@ def _draw_text_line(draw, font, text: str, y: int, align: str, w: int, font_size
 
 
 def _render_receipt_preview(name: str, email: str, message: str, ts: str = "", fmt: dict = None) -> Image.Image:
-    fmt         = fmt or {}
-    lw          = _int_setting("line_width", 32)
+    fmt       = fmt or {}
+    lw        = _int_setting("line_width", 32)
     try:
         font_size = max(10, min(40, int(fmt.get("receipt_font_size") or setting("receipt_font_size") or 18)))
     except (ValueError, TypeError):
         font_size = 18
-    font_key    = fmt.get("receipt_font") or setting("receipt_font") or "mono"
-    font_path   = _RECEIPT_FONTS.get(font_key)
+    font_key  = fmt.get("receipt_font") or setting("receipt_font") or "mono"
+    font_path = _RECEIPT_FONTS.get(font_key)
     try:
         font = ImageFont.truetype(font_path, font_size) if font_path else _load_font(font_size)
     except Exception:
         font = _load_font(font_size)
-    line_h      = font_size + 8
-    w           = PRINTER_WIDTH_PX
-    div         = "─" * lw
 
-    title_text  = (fmt.get("receipt_title")  or setting("receipt_title") or "NEW MESSAGE").strip()
-    footer_text = (fmt.get("receipt_footer") or setting("receipt_footer") or "").strip()
+    sm_size = max(10, font_size - 4)
+    try:
+        sm_font = ImageFont.truetype(font_path, sm_size) if font_path else _load_font(sm_size)
+    except Exception:
+        sm_font = _load_font(sm_size)
+
+    line_h = font_size + 8
+    sm_lh  = sm_size  + 6
+    rule_h = 12
+    w      = PRINTER_WIDTH_PX
+
+    title_text  = (fmt.get("receipt_title")  or setting("receipt_title")  or "NEW MESSAGE").strip()
+    footer_text = (fmt.get("receipt_footer") or setting("receipt_footer") or "THANK YOU!").strip()
+    style       = fmt.get("receipt_style")   or setting("receipt_style")  or "compact"
     show_ts     = _bool_fmt(fmt.get("receipt_show_timestamp"), "receipt_show_timestamp")
     show_email  = _bool_fmt(fmt.get("receipt_show_email"),     "receipt_show_email")
     show_id     = _bool_fmt(fmt.get("receipt_show_id"),        "receipt_show_id")
 
-    title_size  = min(font_size * 2, 48)
-    title_line_h = title_size + 8
+    title_size = min(font_size * 2, 48)
+    title_lh   = title_size + 8
     try:
         title_font = ImageFont.truetype(font_path, title_size) if font_path else _load_font(title_size)
     except Exception:
         title_font = _load_font(title_size)
 
     logo_img = _load_logo()
-
     if not ts:
         ts = datetime.datetime.now(PACIFIC).strftime("%a  %b %-d  %-I:%M %p")
 
-    # ("lv", label, value) → label left, value right (pixel-precise, font-size safe)
-    pre: list[tuple] = [
-        ("center", _truncate_to_width(f"MESSAGE FOR {name.upper()}", lw)),
-        ("left",   ""),
-        ("left",   div),
-        ("left",   ""),
-    ]
-    if show_ts:
-        pre.append(("lv", "TIMESTAMP:", ts))
-        pre.append(("left", ""))
-    if show_email:
-        pre.append(("lv", "EMAIL:", email))
-        pre.append(("left", ""))
-    if show_id:
-        pre.append(("lv", "TRANSACTION #:", "#1  (preview)"))
-    pre.extend([("left", ""), ("left", "")])
+    ts_parts = ts.rsplit("  ", 1)
+    ts_date  = ts_parts[0]
+    ts_time  = ts_parts[1] if len(ts_parts) > 1 else ""
 
-    post: list[tuple] = [("left", ""), ("left", "")]
-    if footer_text:
-        for line in _wrap_text(footer_text, lw):
-            post.append(("center", line))
+    def _tw(f, t):
+        try:   return f.getbbox(t)[2] - f.getbbox(t)[0]
+        except: return len(t) * (getattr(f, "size", font_size) // 2)
+
+    # Build flat ops list: (type, payload, height_px)
+    ops: list[tuple] = []
+    def _gap(px=6):          ops.append(("gap",   None,          px))
+    def _stars():            ops.append(("stars", None,          sm_lh))
+    def _rule():             ops.append(("rule",  None,          rule_h))
+    def _ctr(t, sm=False):  ops.append(("ctr",   (t, sm),      sm_lh if sm else line_h))
+    def _left(t, sm=False): ops.append(("left",  (t, sm),      sm_lh if sm else line_h))
+    def _lv(l, v, sm=False): ops.append(("lv",   (l, v, sm),  sm_lh if sm else line_h))
 
     msg_img = _render_message_image(message, font_size=font_size, font_path=font_path)
-    title_h = line_h + title_line_h + 2 * line_h
-    total_h = title_h + (len(pre) + len(post)) * line_h + msg_img.height
-    if logo_img:
-        total_h += logo_img.height
 
+    _stars()
+    ops.append(("title", title_text, title_lh))
+    _stars()
+    _gap(8)
+
+    if style == "structured":
+        _lv("From:", name.upper())
+        if show_ts:
+            _lv("Date:", ts_date)
+            _lv("Time:", ts_time)
+    else:
+        if show_ts:
+            ops.append(("compact_row", (name, ts), line_h))
+        else:
+            _left(name)
+
+    _rule()
+    if style == "compact":
+        _left("MESSAGE:", sm=True)
+    ops.append(("message", msg_img, msg_img.height))
+    _rule()
+
+    if show_email: _lv("Email:",   email)
+    if show_id:    _lv("Msg ID:", "#1  (preview)", sm=True)
+    _rule()
+    _gap(4)
+
+    stars_n = max(0, (lw - len(footer_text) - 2) // 2)
+    _ctr("*" * stars_n + " " + footer_text + " " + "*" * stars_n, sm=True)
+    _gap(12)
+
+    logo_h  = logo_img.height if logo_img else 0
+    total_h = 16 + logo_h + sum(h for _, _, h in ops) + 16
     img  = Image.new("RGB", (w, total_h), "white")
     draw = ImageDraw.Draw(img)
-    y    = 0
+    y    = 16
 
     if logo_img:
         img.paste(logo_img, (0, y))
-        y += logo_img.height
+        y += logo_h
 
-    y += line_h
-    _draw_text_line(draw, title_font, _truncate_to_width(title_text, lw // 2), y, "center", w, title_size)
-    y += title_line_h + 2 * line_h
-
-    for entry in pre:
-        if len(entry) == 3:
-            _, label, value = entry
-            draw.text((4, y), label, fill="black", font=font)
-            try:
-                vw = font.getbbox(value)[2] - font.getbbox(value)[0]
-            except Exception:
-                vw = len(value) * (font_size // 2)
-            draw.text((w - 4 - vw, y), value, fill="black", font=font)
-        else:
-            align, text = entry
-            _draw_text_line(draw, font, text, y, align, w, font_size)
-        y += line_h
-
-    img.paste(msg_img.convert("RGB"), (0, y))
-    y += msg_img.height
-
-    for align, text in post:
-        _draw_text_line(draw, font, text, y, align, w, font_size)
-        y += line_h
+    for op_type, payload, op_h in ops:
+        if op_type == "gap":
+            pass
+        elif op_type == "stars":
+            star_w = max(1, _tw(sm_font, "*"))
+            s      = "*" * max(lw, (w - 16) // star_w)
+            draw.text((max(0, (w - _tw(sm_font, s)) // 2), y), s, fill="#888", font=sm_font)
+        elif op_type == "rule":
+            dw, gw = 6, 3
+            for x in range(8, w - 8, dw + gw):
+                draw.line([(x, y + 5), (x + dw, y + 5)], fill="#555", width=1)
+        elif op_type == "title":
+            draw.text((max(0, (w - _tw(title_font, payload)) // 2), y),
+                      payload, fill="black", font=title_font)
+        elif op_type == "ctr":
+            text, is_sm = payload
+            f = sm_font if is_sm else font
+            draw.text((max(0, (w - _tw(f, text)) // 2), y), text, fill="#555", font=f)
+        elif op_type == "left":
+            text, is_sm = payload
+            draw.text((8, y), text, fill="black", font=(sm_font if is_sm else font))
+        elif op_type == "lv":
+            label, value, is_sm = payload
+            f = sm_font if is_sm else font
+            draw.text((8, y), label, fill="black", font=f)
+            draw.text((w - 8 - _tw(f, value), y), value, fill="black", font=f)
+        elif op_type == "compact_row":
+            name_v, ts_v = payload
+            draw.text((8, y), name_v, fill="black", font=font)
+            draw.text((w - 8 - _tw(sm_font, ts_v), y), ts_v, fill="#555", font=sm_font)
+        elif op_type == "message":
+            img.paste(payload.convert("RGB"), (0, y))
+        y += op_h
 
     return img
 
@@ -519,9 +561,11 @@ def _utc_to_pacific(utc_str: str) -> str:
 
 def _do_print(row) -> None:
     lw          = _int_setting("line_width", 32)
-    div         = "─" * lw
+    stars       = "*" * lw
+    dash        = "-" * lw
     title_text  = setting("receipt_title").strip() or "NEW MESSAGE"
-    footer_text = setting("receipt_footer").strip()
+    footer_text = setting("receipt_footer").strip() or "THANK YOU!"
+    style       = setting("receipt_style") or "compact"
     show_ts     = setting("receipt_show_timestamp").lower() != "false"
     show_email  = setting("receipt_show_email").lower()     != "false"
     show_id     = setting("receipt_show_id").lower()        != "false"
@@ -538,54 +582,58 @@ def _do_print(row) -> None:
             p.image(logo.convert("L").point(lambda x: 0 if x < 128 else 255).convert("1"))
             p.ln(1)
 
-        p.ln(1)
+        # ── Header ────────────────────────────────────────────────────────────
+        p.text(stars + "\n")
         p.set(align="center", double_width=True, double_height=True, bold=True)
         p.text(_truncate_to_width(title_text, lw // 2) + "\n")
-        p.set(double_width=False, double_height=False, bold=False, align="center")
-        p.ln(2)
-
-        p.text(_truncate_to_width(f"MESSAGE FOR {name.upper()}", lw) + "\n")
+        p.set(double_width=False, double_height=False, bold=False, align="left")
+        p.text(stars + "\n")
         p.ln(1)
 
-        p.set(align="left")
-        p.text(div + "\n")
-        p.ln(2)
+        # ── Meta ──────────────────────────────────────────────────────────────
+        if style == "structured":
+            from_val = _truncate_to_width(name.upper(), lw - len("From:") - 1)
+            p.text("From:" + " " * max(1, lw - len("From:") - len(from_val)) + from_val + "\n")
+            if show_ts:
+                ts_parts = ts.rsplit("  ", 1)
+                ts_date  = ts_parts[0]
+                ts_time  = ts_parts[1] if len(ts_parts) > 1 else ""
+                p.text("Date:" + " " * max(1, lw - len("Date:") - len(ts_date)) + ts_date + "\n")
+                if ts_time:
+                    p.text("Time:" + " " * max(1, lw - len("Time:") - len(ts_time)) + ts_time + "\n")
+        else:
+            name_trunc = _truncate_to_width(name, lw - len(ts) - 1) if show_ts else _truncate_to_width(name, lw)
+            if show_ts:
+                p.text(name_trunc + " " * max(1, lw - len(name_trunc) - len(ts)) + ts + "\n")
+            else:
+                p.text(name_trunc + "\n")
 
-        if show_ts:
-            ts_label = "TIMESTAMP:"
-            ts_pad = " " * max(1, lw - len(ts_label) - len(ts))
-            p.text(ts_label + ts_pad + ts + "\n")
-            p.ln(1)
-
-        if show_email:
-            email_label = "EMAIL:"
-            email_trunc = _truncate_to_width(email, lw - len(email_label) - 1)
-            email_pad = " " * max(1, lw - len(email_label) - len(email_trunc))
-            p.text(email_label + email_pad + email_trunc + "\n")
-            p.ln(1)
-
-        if show_id:
-            id_label = "TRANSACTION #:"
-            id_val = str(msg_id)
-            id_pad = " " * max(1, lw - len(id_label) - len(id_val))
-            p.text(id_label + id_pad + id_val + "\n")
-
-        p.ln(4)
-
+        # ── Message ───────────────────────────────────────────────────────────
+        p.text(dash + "\n")
+        if style == "compact":
+            p.text("MESSAGE:\n")
         p.image(_render_message_image(
             message,
             font_size=_int_setting("receipt_font_size", 22),
             font_path=_RECEIPT_FONTS.get(setting("receipt_font")),
         ))
 
-        p.ln(4)
+        # ── Details ───────────────────────────────────────────────────────────
+        p.text(dash + "\n")
+        if show_email:
+            e_trunc = _truncate_to_width(email, lw - len("Email:") - 1)
+            p.text("Email:" + " " * max(1, lw - len("Email:") - len(e_trunc)) + e_trunc + "\n")
+        if show_id:
+            id_val = str(msg_id)
+            p.text("Msg ID:" + " " * max(1, lw - len("Msg ID:") - len(id_val)) + id_val + "\n")
+        p.text(dash + "\n")
 
-        if footer_text:
-            p.set(align="center")
-            for line in _wrap_text(footer_text, lw):
-                p.text(line + "\n")
-            p.set(align="left")
-
+        # ── Footer ────────────────────────────────────────────────────────────
+        stars_n = max(0, (lw - len(footer_text) - 2) // 2)
+        p.set(align="center")
+        p.text("*" * stars_n + " " + footer_text + " " + "*" * stars_n + "\n")
+        p.set(align="left")
+        p.ln(3)
         p.cut()
     finally:
         try:
