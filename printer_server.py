@@ -48,7 +48,6 @@ SMTP_USER    = os.environ.get("SMTP_USER", "")
 SMTP_PASS    = os.environ.get("SMTP_PASS", "")
 NOTIFY_EMAIL = os.environ.get("NOTIFY_EMAIL", SMTP_USER)
 DB_PATH      = os.environ.get("DB_PATH", "/app/data/messages.db")
-# Only trust CF-Connecting-IP / X-Forwarded-For when running behind a known proxy.
 TRUST_PROXY  = os.environ.get("TRUST_PROXY", "false").lower() == "true"
 PACIFIC      = ZoneInfo("America/Los_Angeles")
 STATIC_DIR   = Path(__file__).parent / "static"
@@ -60,26 +59,25 @@ _MONO_FONTS = [
 ]
 
 # ── Runtime settings (stored in SQLite, editable via PATCH /settings) ────────
-# Env vars provide the initial defaults on first run.
 
 _DEFAULTS: dict[str, str] = {
-    "prints_per_hour":     os.environ.get("PRINTS_PER_HOUR", "10"),
-    "max_per_ip_hour":     os.environ.get("MAX_PER_IP_HOUR", "3"),
-    "line_width":          os.environ.get("LINE_WIDTH", "32"),
-    "allowed_origin":      os.environ.get("ALLOWED_ORIGIN", "https://your-domain.com"),
-    "printer_mode":        os.environ.get("PRINTER_MODE", "auto"),  # auto|usb|network
-    "printer_host":        os.environ.get("PRINTER_HOST", ""),
-    "printer_port":        os.environ.get("PRINTER_PORT", "9100"),
-    "email_notifications": os.environ.get("EMAIL_NOTIFICATIONS", "true"),
-    "receipt_header":         os.environ.get("RECEIPT_HEADER", ""),
-    "receipt_font":           os.environ.get("RECEIPT_FONT", "mono"),
-    "receipt_font_size":      os.environ.get("RECEIPT_FONT_SIZE", "18"),
+    "prints_per_hour":        os.environ.get("PRINTS_PER_HOUR",        "10"),
+    "max_per_ip_hour":        os.environ.get("MAX_PER_IP_HOUR",        "3"),
+    "line_width":             os.environ.get("LINE_WIDTH",             "32"),
+    "allowed_origin":         os.environ.get("ALLOWED_ORIGIN",         "https://your-domain.com"),
+    "printer_mode":           os.environ.get("PRINTER_MODE",           "auto"),
+    "printer_host":           os.environ.get("PRINTER_HOST",           ""),
+    "printer_port":           os.environ.get("PRINTER_PORT",           "9100"),
+    "email_notifications":    os.environ.get("EMAIL_NOTIFICATIONS",    "true"),
+    "receipt_header":         os.environ.get("RECEIPT_HEADER",         ""),
+    "receipt_font":           os.environ.get("RECEIPT_FONT",           "serif"),
+    "receipt_font_size":      os.environ.get("RECEIPT_FONT_SIZE",      "22"),
     "receipt_show_timestamp": os.environ.get("RECEIPT_SHOW_TIMESTAMP", "true"),
-    "receipt_show_email":     os.environ.get("RECEIPT_SHOW_EMAIL", "true"),
-    "receipt_show_id":        os.environ.get("RECEIPT_SHOW_ID", "true"),
-    "receipt_title":          os.environ.get("RECEIPT_TITLE", ""),
-    "receipt_footer":         os.environ.get("RECEIPT_FOOTER", ""),
-    "receipt_style":          os.environ.get("RECEIPT_STYLE", "compact"),
+    "receipt_show_email":     os.environ.get("RECEIPT_SHOW_EMAIL",     "true"),
+    "receipt_show_id":        os.environ.get("RECEIPT_SHOW_ID",        "true"),
+    "receipt_title":          os.environ.get("RECEIPT_TITLE",          ""),
+    "receipt_footer":         os.environ.get("RECEIPT_FOOTER",         ""),
+    "receipt_style":          os.environ.get("RECEIPT_STYLE",          "compact"),
 }
 
 _cfg: dict[str, str] = {}
@@ -116,7 +114,7 @@ _print_counter = Counter("printer_prints_total",   "Print attempts",           [
 _queue_gauge   = Gauge(  "printer_queue_depth",    "Messages in print queue")
 _printer_up    = Gauge(  "printer_connected",      "1 = last print succeeded")
 
-# ── OTEL traces (no-op unless OTEL_EXPORTER_OTLP_ENDPOINT is set) ─────────────
+# ── OTEL traces ───────────────────────────────────────────────────────────────
 
 def _setup_otel(app):
     endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "")
@@ -151,7 +149,7 @@ async def lifespan(app: FastAPI):
     if not ADMIN_KEY:
         logger.warning("ADMIN_KEY not set — admin endpoints will return 500")
     yield
-    _print_queue.put(None)  # stop worker
+    _print_queue.put(None)
 
 
 app = FastAPI(
@@ -165,8 +163,7 @@ Instrumentator(excluded_handlers=["/metrics", "/health"]).instrument(app).expose
 _setup_otel(app)
 
 
-# ── CORS middleware ────────────────────────────────────────────────────────────
-# Reads allowed_origin from runtime settings so it can be changed without restart.
+# ── CORS middleware ───────────────────────────────────────────────────────────
 
 @app.middleware("http")
 async def cors(request: Request, call_next):
@@ -315,12 +312,10 @@ def _is_ascii(text: str) -> bool:
 
 
 def _visual_len(text: str) -> int:
-    """Character count weighted by East Asian width (wide/fullwidth = 2, others = 1)."""
     return sum(2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1 for ch in text)
 
 
 def _truncate_to_width(text: str, max_width: int) -> str:
-    """Truncate text so its visual width does not exceed max_width."""
     w = 0
     for i, ch in enumerate(text):
         cw = 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
@@ -355,7 +350,7 @@ def _render_message_image(text: str, font_size: int = 22, font_path: str = None)
         font = ImageFont.truetype(font_path, font_size) if font_path else _load_font(font_size)
     except Exception:
         font = _load_font(font_size)
-    line_height = font_size + 8  # extra clearance for emoji descenders
+    line_height = font_size + 8
     cpl         = max(20, int(PRINTER_WIDTH_PX / (font_size * 0.6)))
     lines: list[str] = []
     for paragraph in (text or "").split("\n"):
@@ -376,8 +371,6 @@ def _render_message_image(text: str, font_size: int = 22, font_path: str = None)
         for ln in lines:
             pj.text((0, y), ln, fill="black", font=font)
             y += line_height
-    # Emoji colors (yellows, oranges) map to light grey in L-mode; threshold at 200
-    # so they register as black ink rather than disappearing into white.
     return img.convert("L").point(lambda x: 0 if x < 200 else 255).convert("1")
 
 
@@ -400,25 +393,33 @@ def _bool_fmt(val, setting_key: str) -> bool:
     return setting(setting_key).lower() != "false"
 
 
-def _draw_text_line(draw, font, text: str, y: int, align: str, w: int, font_size: int) -> None:
-    try:
-        bbox = font.getbbox(text)
-        tw   = bbox[2] - bbox[0]
-    except Exception:
-        tw = len(text) * (font_size // 2)
-    x = max(0, (w - tw) // 2) if align == "center" else 4
-    draw.text((x, y), text, fill="black", font=font)
+# ── Receipt fonts ─────────────────────────────────────────────────────────────
+
+_RECEIPT_FONTS = {
+    "mono":  "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+    "sans":  "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "serif": "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+}
 
 
-def _render_receipt_preview(name: str, email: str, message: str, ts: str = "", fmt: dict = None) -> Image.Image:
-    fmt       = fmt or {}
-    lw        = _int_setting("line_width", 32)
+def _render_receipt_preview(
+    name: str,
+    email: str,
+    message: str,
+    ts: str = "",
+    fmt: dict = None,
+) -> Image.Image:
+    fmt = fmt or {}
+
+    # ── Settings ──────────────────────────────────────────────────────────────
     try:
         font_size = max(10, min(40, int(fmt.get("receipt_font_size") or setting("receipt_font_size") or 18)))
     except (ValueError, TypeError):
         font_size = 18
+
     font_key  = fmt.get("receipt_font") or setting("receipt_font") or "mono"
     font_path = _RECEIPT_FONTS.get(font_key)
+
     try:
         font = ImageFont.truetype(font_path, font_size) if font_path else _load_font(font_size)
     except Exception:
@@ -430,81 +431,98 @@ def _render_receipt_preview(name: str, email: str, message: str, ts: str = "", f
     except Exception:
         sm_font = _load_font(sm_size)
 
-    line_h = font_size + 8
-    sm_lh  = sm_size  + 6
-    rule_h = 12
-    w      = PRINTER_WIDTH_PX
+    lbl_size = max(8, font_size - 6)
+    try:
+        lbl_font = ImageFont.truetype(font_path, lbl_size) if font_path else _load_font(lbl_size)
+    except Exception:
+        lbl_font = _load_font(lbl_size)
 
-    title_text  = (fmt.get("receipt_title")  or setting("receipt_title")  or "NEW MESSAGE").strip()
-    footer_text = (fmt.get("receipt_footer") or setting("receipt_footer") or "THANK YOU!").strip()
-    style       = fmt.get("receipt_style")   or setting("receipt_style")  or "compact"
-    show_ts     = _bool_fmt(fmt.get("receipt_show_timestamp"), "receipt_show_timestamp")
-    show_email  = _bool_fmt(fmt.get("receipt_show_email"),     "receipt_show_email")
-    show_id     = _bool_fmt(fmt.get("receipt_show_id"),        "receipt_show_id")
-
-    title_size = min(font_size * 2, 48)
-    title_lh   = title_size + 8
+    title_size = min(font_size + 8, 36)
     try:
         title_font = ImageFont.truetype(font_path, title_size) if font_path else _load_font(title_size)
     except Exception:
         title_font = _load_font(title_size)
 
+    w          = PRINTER_WIDTH_PX
+    line_h     = font_size + 8
+    sm_lh      = sm_size  + 6
+    lbl_lh     = lbl_size + 4
+    title_lh   = title_size + 10
+    thick_h    = 6    # thick rule band height
+    thin_h     = 10   # thin rule band height
+    pad        = 8    # left/right margin in px
+
+    title_text  = (fmt.get("receipt_title")  or setting("receipt_title")  or "New message").strip()
+    footer_text = (fmt.get("receipt_footer") or setting("receipt_footer") or "Thank you").strip()
+    show_ts     = _bool_fmt(fmt.get("receipt_show_timestamp"), "receipt_show_timestamp")
+    show_email  = _bool_fmt(fmt.get("receipt_show_email"),     "receipt_show_email")
+    show_id     = _bool_fmt(fmt.get("receipt_show_id"),        "receipt_show_id")
+
     logo_img = _load_logo()
+
     if not ts:
         ts = datetime.datetime.now(PACIFIC).strftime("%a  %b %-d  %-I:%M %p")
 
     ts_parts = ts.rsplit("  ", 1)
-    ts_date  = ts_parts[0]
-    ts_time  = ts_parts[1] if len(ts_parts) > 1 else ""
-
-    def _tw(f, t):
-        try:   return f.getbbox(t)[2] - f.getbbox(t)[0]
-        except: return len(t) * (getattr(f, "size", font_size) // 2)
-
-    # Build flat ops list: (type, payload, height_px)
-    ops: list[tuple] = []
-    def _gap(px=6):          ops.append(("gap",   None,          px))
-    def _stars():            ops.append(("stars", None,          sm_lh))
-    def _rule():             ops.append(("rule",  None,          rule_h))
-    def _ctr(t, sm=False):  ops.append(("ctr",   (t, sm),      sm_lh if sm else line_h))
-    def _left(t, sm=False): ops.append(("left",  (t, sm),      sm_lh if sm else line_h))
-    def _lv(l, v, sm=False): ops.append(("lv",   (l, v, sm),  sm_lh if sm else line_h))
+    ts_date  = ts_parts[0].strip()
+    ts_time  = ts_parts[1].strip() if len(ts_parts) > 1 else ""
+    ts_line  = (ts_date + "  ·  " + ts_time) if ts_time else ts_date
 
     msg_img = _render_message_image(message, font_size=font_size, font_path=font_path)
 
-    _stars()
-    ops.append(("title", title_text, title_lh))
-    _stars()
-    _gap(8)
+    # ── Helper: text width ────────────────────────────────────────────────────
+    def _tw(f, t: str) -> int:
+        try:
+            bbox = f.getbbox(t)
+            return bbox[2] - bbox[0]
+        except Exception:
+            return len(t) * (getattr(f, "size", font_size) // 2)
 
-    if style == "structured":
-        _lv("From:", name.upper())
-        if show_ts:
-            _lv("Date:", ts_date)
-            _lv("Time:", ts_time)
-    else:
-        if show_ts:
-            ops.append(("compact_row", (name, ts), line_h))
-        else:
-            _left(name)
+    # ── Build ops list ────────────────────────────────────────────────────────
+    # Each op: (type, payload, height_px)
+    ops: list[tuple] = []
 
-    _rule()
-    if style == "compact":
-        _left("MESSAGE:", sm=True)
-    ops.append(("message", msg_img, msg_img.height))
-    _rule()
+    def _gap(px: int = 4):          ops.append(("gap",       None,           px))
+    def _thick_rule():               ops.append(("thick",     None,           thick_h))
+    def _thin_rule():                ops.append(("thin",      None,           thin_h))
+    def _title(t: str):              ops.append(("title",     t,              title_lh))
+    def _subtitle(t: str):           ops.append(("subtitle",  t,              sm_lh))
+    def _kv(label: str, value: str): ops.append(("kv",        (label, value), line_h))
+    def _sec_label(t: str):          ops.append(("sec_label", t,              lbl_lh))
+    def _msg(img: Image.Image):      ops.append(("message",   img,            img.height))
+    def _footer(t: str):             ops.append(("footer",    t,              sm_lh))
 
-    if show_email: _lv("Email:",   email)
-    if show_id:    _lv("Msg ID:", "#1  (preview)", sm=True)
-    _rule()
+    _thick_rule()
+    _gap(6)
+    _title(title_text.upper())
+    if show_ts:
+        _subtitle(ts_line)
     _gap(4)
+    _thin_rule()
 
-    stars_n = max(0, (lw - len(footer_text) - 2) // 2)
-    _ctr("*" * stars_n + " " + footer_text + " " + "*" * stars_n, sm=True)
-    _gap(12)
+    _kv("FROM",  _truncate_to_width(name, 24))
+    if show_email:
+        _kv("EMAIL", _truncate_to_width(email, 24))
 
+    _thin_rule()
+    _sec_label("MESSAGE")
+    _gap(2)
+    _msg(msg_img)
+    _gap(2)
+    _thin_rule()
+
+    if show_id:
+        _kv("#", "#1  (preview)")
+
+    _thick_rule()
+    _gap(6)
+    _footer(footer_text.upper())
+    _gap(16)
+
+    # ── Compute total height ──────────────────────────────────────────────────
     logo_h  = logo_img.height if logo_img else 0
-    total_h = 16 + logo_h + sum(h for _, _, h in ops) + 16
+    total_h = 16 + logo_h + sum(h for _, _, h in ops)
+
     img  = Image.new("RGB", (w, total_h), "white")
     draw = ImageDraw.Draw(img)
     y    = 16
@@ -514,41 +532,49 @@ def _render_receipt_preview(name: str, email: str, message: str, ts: str = "", f
         y += logo_h
 
     for op_type, payload, op_h in ops:
+        mid_y = y + op_h // 2
+
         if op_type == "gap":
             pass
-        elif op_type == "stars":
-            star_w = max(1, _tw(sm_font, "*"))
-            s      = "*" * max(lw, (w - 16) // star_w)
-            draw.text((max(0, (w - _tw(sm_font, s)) // 2), y), s, fill="#888", font=sm_font)
-        elif op_type == "rule":
-            dw, gw = 6, 3
-            for x in range(8, w - 8, dw + gw):
-                draw.line([(x, y + 5), (x + dw, y + 5)], fill="#555", width=1)
+
+        elif op_type == "thick":
+            draw.rectangle([(0, y), (w, y + thick_h - 1)], fill="#111")
+
+        elif op_type == "thin":
+            draw.line([(pad, mid_y), (w - pad, mid_y)], fill="#ccc", width=1)
+
         elif op_type == "title":
-            draw.text((max(0, (w - _tw(title_font, payload)) // 2), y),
-                      payload, fill="black", font=title_font)
-        elif op_type == "ctr":
-            text, is_sm = payload
-            f = sm_font if is_sm else font
-            draw.text((max(0, (w - _tw(f, text)) // 2), y), text, fill="#555", font=f)
-        elif op_type == "left":
-            text, is_sm = payload
-            draw.text((8, y), text, fill="black", font=(sm_font if is_sm else font))
-        elif op_type == "lv":
-            label, value, is_sm = payload
-            f = sm_font if is_sm else font
-            draw.text((8, y), label, fill="black", font=f)
-            draw.text((w - 8 - _tw(f, value), y), value, fill="black", font=f)
-        elif op_type == "compact_row":
-            name_v, ts_v = payload
-            draw.text((8, y), name_v, fill="black", font=font)
-            draw.text((w - 8 - _tw(sm_font, ts_v), y), ts_v, fill="#555", font=sm_font)
+            tw = _tw(title_font, payload)
+            draw.text((max(pad, (w - tw) // 2), y), payload, fill="#111", font=title_font)
+
+        elif op_type == "subtitle":
+            tw = _tw(sm_font, payload)
+            draw.text((max(pad, (w - tw) // 2), y), payload, fill="#999", font=sm_font)
+
+        elif op_type == "kv":
+            label, value = payload
+            # Label: fixed muted caps
+            draw.text((pad, y), label, fill="#bbb", font=lbl_font)
+            # Value: right side
+            vw = _tw(font, value)
+            draw.text((w - pad - vw, y), value, fill="#111", font=font)
+
+        elif op_type == "sec_label":
+            draw.text((pad, y), payload.upper(), fill="#bbb", font=lbl_font)
+
         elif op_type == "message":
             img.paste(payload.convert("RGB"), (0, y))
+
+        elif op_type == "footer":
+            tw = _tw(sm_font, payload)
+            draw.text((max(pad, (w - tw) // 2), y), payload, fill="#999", font=sm_font)
+
         y += op_h
 
     return img
 
+
+# ── UTC → Pacific ─────────────────────────────────────────────────────────────
 
 def _utc_to_pacific(utc_str: str) -> str:
     try:
@@ -559,82 +585,111 @@ def _utc_to_pacific(utc_str: str) -> str:
         return utc_str
 
 
+# ── ESC/POS print (minimal layout) ───────────────────────────────────────────
+#
+#  Uses the same visual hierarchy as the preview renderer.
+#  ESC/POS double-strike  = thick rule equivalent.
+#  Regular dashes (─)     = thin rule.
+
 def _do_print(row) -> None:
-    lw          = _int_setting("line_width", 32)
-    stars       = "*" * lw
-    dash        = "-" * lw
-    title_text  = setting("receipt_title").strip() or "NEW MESSAGE"
-    footer_text = setting("receipt_footer").strip() or "THANK YOU!"
-    style       = setting("receipt_style") or "compact"
+    lw = _int_setting("line_width", 32)
+
+    # ── Resolve settings ──────────────────────────────────────────────────────
+    title_text  = (setting("receipt_title").strip()  or "NEW MESSAGE").upper()
+    footer_text = (setting("receipt_footer").strip() or "THANK YOU").upper()
     show_ts     = setting("receipt_show_timestamp").lower() != "false"
     show_email  = setting("receipt_show_email").lower()     != "false"
     show_id     = setting("receipt_show_id").lower()        != "false"
+    font_size   = _int_setting("receipt_font_size", 22)
+    font_path   = _RECEIPT_FONTS.get(setting("receipt_font"))
     logo        = _load_logo()
-    p           = _get_printer()
-    try:
-        ts      = row["browser_time"] or _utc_to_pacific(row["received_at"])
-        name    = row["name"]
-        email   = row["email"]
-        msg_id  = row["id"]
-        message = row["message"]
 
+    ts      = row["browser_time"] or _utc_to_pacific(row["received_at"])
+    name    = row["name"]
+    email   = row["email"]
+    msg_id  = row["id"]
+    message = row["message"]
+
+    # ── Timestamp: "Mon  May 12  2:41 PM" → split into date · time ───────────
+    ts_parts = ts.rsplit("  ", 1)
+    ts_date  = ts_parts[0].strip()
+    ts_time  = ts_parts[1].strip() if len(ts_parts) > 1 else ""
+    ts_line  = (ts_date + "  .  " + ts_time) if ts_time else ts_date
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
+    thick = "=" * lw          # thick rule  ════
+    thin  = "-" * lw          # thin rule   ────
+
+    def _kv(label: str, value: str) -> str:
+        """Fixed 6-char label column, value right-fills remaining width."""
+        col = 6
+        label_out = label[:col].upper().ljust(col)
+        max_val   = lw - col - 2
+        value_out = _truncate_to_width(value, max_val)
+        gap       = max(1, lw - col - len(value_out))
+        return label_out + " " * gap + value_out + "\n"
+
+    def _center(text: str) -> str:
+        text = _truncate_to_width(text, lw)
+        pad  = max(0, (lw - _visual_len(text)) // 2)
+        return " " * pad + text + "\n"
+
+    p = _get_printer()
+    try:
+        # ── Logo ──────────────────────────────────────────────────────────────
         if logo:
             p.image(logo.convert("L").point(lambda x: 0 if x < 128 else 255).convert("1"))
             p.ln(1)
 
-        # ── Header ────────────────────────────────────────────────────────────
-        p.text(stars + "\n")
-        p.set(align="center", double_width=True, double_height=True, bold=True)
-        p.text(_truncate_to_width(title_text, lw // 2) + "\n")
-        p.set(double_width=False, double_height=False, bold=False, align="left")
-        p.text(stars + "\n")
+        # ── Thick rule ────────────────────────────────────────────────────────
+        p.set(bold=True)
+        p.text(thick + "\n")
+        p.set(bold=False)
         p.ln(1)
 
-        # ── Meta ──────────────────────────────────────────────────────────────
-        if style == "structured":
-            from_val = _truncate_to_width(name.upper(), lw - len("From:") - 1)
-            p.text("From:" + " " * max(1, lw - len("From:") - len(from_val)) + from_val + "\n")
-            if show_ts:
-                ts_parts = ts.rsplit("  ", 1)
-                ts_date  = ts_parts[0]
-                ts_time  = ts_parts[1] if len(ts_parts) > 1 else ""
-                p.text("Date:" + " " * max(1, lw - len("Date:") - len(ts_date)) + ts_date + "\n")
-                if ts_time:
-                    p.text("Time:" + " " * max(1, lw - len("Time:") - len(ts_time)) + ts_time + "\n")
-        else:
-            name_trunc = _truncate_to_width(name, lw - len(ts) - 1) if show_ts else _truncate_to_width(name, lw)
-            if show_ts:
-                p.text(name_trunc + " " * max(1, lw - len(name_trunc) - len(ts)) + ts + "\n")
-            else:
-                p.text(name_trunc + "\n")
+        # ── Title (centred, bold) ─────────────────────────────────────────────
+        p.set(align="center", bold=True)
+        p.text(_truncate_to_width(title_text, lw) + "\n")
+        p.set(bold=False)
 
-        # ── Message ───────────────────────────────────────────────────────────
-        p.text(dash + "\n")
-        if style == "compact":
-            p.text("MESSAGE:\n")
-        p.image(_render_message_image(
-            message,
-            font_size=_int_setting("receipt_font_size", 22),
-            font_path=_RECEIPT_FONTS.get(setting("receipt_font")),
-        ))
+        # ── Timestamp subtitle ────────────────────────────────────────────────
+        if show_ts:
+            p.set(align="center")
+            p.text(_truncate_to_width(ts_line, lw) + "\n")
+        p.set(align="left")
+        p.ln(1)
 
-        # ── Details ───────────────────────────────────────────────────────────
-        p.text(dash + "\n")
+        # ── Thin rule ─────────────────────────────────────────────────────────
+        p.text(thin + "\n")
+
+        # ── Key/value rows ────────────────────────────────────────────────────
+        p.text(_kv("FROM",  name))
         if show_email:
-            e_trunc = _truncate_to_width(email, lw - len("Email:") - 1)
-            p.text("Email:" + " " * max(1, lw - len("Email:") - len(e_trunc)) + e_trunc + "\n")
+            p.text(_kv("EMAIL", email))
+
+        # ── Message block ─────────────────────────────────────────────────────
+        p.text(thin + "\n")
+        p.text("MSG\n")
+        p.image(_render_message_image(message, font_size=font_size, font_path=font_path))
+
+        # ── Meta ──────────────────────────────────────────────────────────────
+        p.text(thin + "\n")
         if show_id:
-            id_val = str(msg_id)
-            p.text("Msg ID:" + " " * max(1, lw - len("Msg ID:") - len(id_val)) + id_val + "\n")
-        p.text(dash + "\n")
+            p.text(_kv("#", str(msg_id)))
+
+        # ── Thick rule ────────────────────────────────────────────────────────
+        p.set(bold=True)
+        p.text(thick + "\n")
+        p.set(bold=False)
+        p.ln(1)
 
         # ── Footer ────────────────────────────────────────────────────────────
-        stars_n = max(0, (lw - len(footer_text) - 2) // 2)
         p.set(align="center")
-        p.text("*" * stars_n + " " + footer_text + " " + "*" * stars_n + "\n")
+        p.text(_truncate_to_width(footer_text, lw) + "\n")
         p.set(align="left")
-        p.ln(3)
+        p.ln(4)
         p.cut()
+
     finally:
         try:
             p.close()
@@ -807,12 +862,6 @@ class SettingsPatch(BaseModel):
 
 _INT_SETTINGS = {"prints_per_hour", "max_per_ip_hour", "line_width", "printer_port", "receipt_font_size"}
 
-_RECEIPT_FONTS = {
-    "mono":  "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-    "sans":  "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "serif": "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
-}
-
 
 @app.patch("/settings", dependencies=[Depends(require_admin)])
 async def patch_settings(body: SettingsPatch):
@@ -840,7 +889,7 @@ async def patch_settings(body: SettingsPatch):
     return result
 
 
-_LOGO_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
+_LOGO_MAX_BYTES = 5 * 1024 * 1024
 
 
 @app.post("/settings/logo", dependencies=[Depends(require_admin)])
@@ -929,6 +978,7 @@ async def contact(request: Request):
         )
     else:
         ip = request.client.host if request.client else "unknown"
+
     ua        = request.headers.get("User-Agent", "unknown")[:120]
     headers   = json.dumps(dict(request.headers))
     timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
