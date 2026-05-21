@@ -97,138 +97,14 @@
         </div>
       </div>
 
+      <div id="actionMsg" class="hidden mb-2 text-gray-500 text-xs"></div>
+
       <div id="messagesTable" class="overflow-x-auto">
         <div class="text-gray-600 text-xs">Enter admin key and click Connect.</div>
       </div>
     </div>
   </div>
 
-</div>
-
-<!-- ── Receipt Preview panel ─────────────────────────────────────────────── -->
-<div class="px-6 pb-6">
-  <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
-    <h2 class="font-bold text-gray-200 mb-4">Receipt Preview</h2>
-    <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
-
-      <!-- Sample data -->
-      <div class="space-y-3">
-        <p class="text-xs text-gray-600 uppercase tracking-wider">Sample data</p>
-        <div>
-          <label class="block text-xs text-gray-500 mb-1">Name</label>
-          <input id="prev_name" type="text" value="Ada Lovelace"
-            class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-gray-500">
-        </div>
-        <div>
-          <label class="block text-xs text-gray-500 mb-1">Email</label>
-          <input id="prev_email" type="text" value="ada@example.com"
-            class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-gray-500">
-        </div>
-        <div>
-          <label class="block text-xs text-gray-500 mb-1">Message</label>
-          <textarea id="prev_message" rows="3"
-            class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-gray-500">Hello from your website! This is a test message.</textarea>
-        </div>
-      </div>
-
-      <!-- Format controls -->
-      <div class="space-y-3">
-        <p class="text-xs text-gray-600 uppercase tracking-wider">Format</p>
-        <div>
-          <label class="block text-xs text-gray-500 mb-1">Logo image</label>
-          <div class="flex gap-2 items-center flex-wrap">
-            <input id="logoFile" type="file" accept="image/*" class="hidden" onchange="uploadLogo(this)">
-            <button onclick="document.getElementById('logoFile').click()"
-              class="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded text-xs transition">Upload</button>
-            <button onclick="removeLogo()"
-              class="px-2 py-1 bg-gray-800 hover:bg-gray-700 text-gray-500 hover:text-gray-400 rounded text-xs transition">Remove</button>
-            <span id="logoStatus" class="text-xs text-gray-600"></span>
-          </div>
-          <div id="logoThumb" class="mt-2 hidden">
-            <img id="logoThumbImg" src="" alt="logo" class="border border-gray-700 rounded" style="max-height:48px;">
-          </div>
-        </div>
-        <div>
-          <label class="block text-xs text-gray-500 mb-1">Title (large bold)</label>
-          <input id="fmt_title" type="text" placeholder="e.g. PING"
-            class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-gray-500">
-        </div>
-        <div>
-          <label class="block text-xs text-gray-500 mb-1">Subtitle text</label>
-          <input id="fmt_header" type="text" placeholder="e.g. badhrinadh.com"
-            class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-gray-500">
-        </div>
-        <div>
-          <label class="block text-xs text-gray-500 mb-1">Footer text</label>
-          <input id="fmt_footer" type="text" placeholder="e.g. Thanks for stopping by!"
-            class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-gray-500">
-        </div>
-        <div>
-          <label class="block text-xs text-gray-500 mb-1">Layout style</label>
-          <select id="fmt_style"
-            class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-gray-500">
-            <option value="compact">E — Compact  (name + date on one line)</option>
-            <option value="structured">F — Structured  (From / Date / Time rows)</option>
-          </select>
-        </div>
-        <div class="grid grid-cols-2 gap-2">
-          <div>
-            <label class="block text-xs text-gray-500 mb-1">Font</label>
-            <select id="fmt_font"
-              class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-gray-500">
-              <option value="mono">Monospace</option>
-              <option value="sans">Sans-serif</option>
-              <option value="serif">Serif</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-xs text-gray-500 mb-1">Size</label>
-            <select id="fmt_font_size"
-              class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-gray-500">
-              <option value="14">Small</option>
-              <option value="18">Medium</option>
-              <option value="22">Large</option>
-              <option value="26">X-Large</option>
-            </select>
-          </div>
-        </div>
-        <div class="space-y-2 pt-1">
-          <label class="flex items-center gap-2 cursor-pointer select-none">
-            <input id="fmt_show_ts"    type="checkbox" checked class="accent-gray-400">
-            <span class="text-xs text-gray-400">Show timestamp</span>
-          </label>
-          <label class="flex items-center gap-2 cursor-pointer select-none">
-            <input id="fmt_show_email" type="checkbox" checked class="accent-gray-400">
-            <span class="text-xs text-gray-400">Show email</span>
-          </label>
-          <label class="flex items-center gap-2 cursor-pointer select-none">
-            <input id="fmt_show_id"    type="checkbox" checked class="accent-gray-400">
-            <span class="text-xs text-gray-400">Show message ID</span>
-          </label>
-        </div>
-        <div class="flex gap-2 pt-1">
-          <button onclick="previewReceipt()"
-            class="flex-1 bg-gray-100 text-gray-900 hover:bg-white py-2 rounded text-xs transition font-medium">
-            Preview
-          </button>
-          <button onclick="saveReceiptFormat()"
-            class="flex-1 bg-gray-800 text-gray-300 hover:bg-gray-700 py-2 rounded text-xs transition">
-            Save format
-          </button>
-        </div>
-        <div id="fmtSaved" class="hidden text-gray-400 text-xs">Format saved.</div>
-        <div id="previewErr" class="hidden text-gray-500 text-xs break-all"></div>
-      </div>
-
-      <!-- Preview image -->
-      <div class="flex items-start justify-center">
-        <div id="previewContainer" class="text-gray-600 text-xs text-center py-8 w-full">
-          Fill in sample data and click Preview.
-        </div>
-      </div>
-
-    </div>
-  </div>
 </div>
 
 <!-- ── Expanded message modal ─────────────────────────────────────────────── -->
@@ -261,15 +137,6 @@ const SETTING_LABELS = {
   printer_host:        'Printer IP (network mode)',
   printer_port:        'Printer port (default 9100)',
   email_notifications: 'Email notifications (true|false)',
-  receipt_title:          'Receipt title (large bold, top)',
-  receipt_header:         'Receipt subtitle text (optional)',
-  receipt_footer:         'Receipt footer text (bottom)',
-  receipt_font:           'Receipt font  (mono|sans|serif)',
-  receipt_font_size:      'Receipt font size (px)',
-  receipt_show_timestamp: 'Show timestamp on receipt (true|false)',
-  receipt_show_email:     'Show email on receipt (true|false)',
-  receipt_show_id:        'Show message ID on receipt (true|false)',
-  receipt_style:          'Receipt layout style  (compact|structured)',
 };
 
 // ── Key persistence ──────────────────────────────────────────────────────────
@@ -343,47 +210,10 @@ async function loadSettings() {
   try {
     _currentSettings = await api('/settings');
     renderSettingsForm(_currentSettings);
-    populateFormatControls(_currentSettings);
     document.getElementById('settingsErr').classList.add('hidden');
   } catch (e) {
     document.getElementById('settingsErr').textContent = e.message;
     document.getElementById('settingsErr').classList.remove('hidden');
-  }
-}
-
-function populateFormatControls(s) {
-  const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
-  set('fmt_title',  s.receipt_title);
-  set('fmt_header', s.receipt_header);
-  set('fmt_footer', s.receipt_footer);
-  set('fmt_font',      s.receipt_font      || 'mono');
-  set('fmt_font_size', s.receipt_font_size || '18');
-  set('fmt_style',     s.receipt_style     || 'compact');
-  const boolEl = (id, key) => {
-    const el = document.getElementById(id);
-    if (el) el.checked = (s[key] ?? 'true') !== 'false';
-  };
-  boolEl('fmt_show_ts',    'receipt_show_timestamp');
-  boolEl('fmt_show_email', 'receipt_show_email');
-  boolEl('fmt_show_id',    'receipt_show_id');
-
-  const thumb    = document.getElementById('logoThumb');
-  const thumbImg = document.getElementById('logoThumbImg');
-  const status   = document.getElementById('logoStatus');
-  if (s.receipt_logo_set) {
-    fetch('/settings/logo', { headers: { 'X-Admin-Key': getKey() } })
-      .then(r => r.blob())
-      .then(b => {
-        const old = thumbImg.src;
-        if (old && old.startsWith('blob:')) URL.revokeObjectURL(old);
-        thumbImg.src = URL.createObjectURL(b);
-        thumb.classList.remove('hidden');
-      }).catch(() => {});
-    status.textContent = 'Logo set';
-  } else {
-    thumb.classList.add('hidden');
-    thumbImg.src = '';
-    status.textContent = '';
   }
 }
 
@@ -525,115 +355,21 @@ function showModal(i) {
 }
 function closeModal() { document.getElementById('modal').classList.add('hidden'); }
 
-// ── Receipt preview ───────────────────────────────────────────────────────────
-
-function _fmtFromControls() {
-  return {
-    receipt_title:          document.getElementById('fmt_title').value,
-    receipt_header:         document.getElementById('fmt_header').value,
-    receipt_footer:         document.getElementById('fmt_footer').value,
-    receipt_font:           document.getElementById('fmt_font').value,
-    receipt_font_size:      document.getElementById('fmt_font_size').value,
-    receipt_show_timestamp: document.getElementById('fmt_show_ts').checked    ? 'true' : 'false',
-    receipt_show_email:     document.getElementById('fmt_show_email').checked  ? 'true' : 'false',
-    receipt_show_id:        document.getElementById('fmt_show_id').checked     ? 'true' : 'false',
-    receipt_style:          document.getElementById('fmt_style').value,
-  };
-}
-
-async function previewReceipt() {
-  const name      = document.getElementById('prev_name').value    || 'Ada Lovelace';
-  const email     = document.getElementById('prev_email').value   || 'ada@example.com';
-  const message   = document.getElementById('prev_message').value || 'Hello!';
-  const container = document.getElementById('previewContainer');
-  const errEl     = document.getElementById('previewErr');
-  errEl.classList.add('hidden');
-  container.innerHTML = '<div class="text-gray-400 text-xs py-8">Rendering…</div>';
-  try {
-    const res = await fetch('/receipt/preview', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Admin-Key': getKey() },
-      body: JSON.stringify({ name, email, message, fmt: _fmtFromControls() }),
-    });
-    if (!res.ok) {
-      const txt = await res.text().catch(() => res.statusText);
-      throw new Error(`${res.status}: ${txt}`);
-    }
-    const blob = await res.blob();
-    const url  = URL.createObjectURL(blob);
-    const old  = container.querySelector('img');
-    if (old) URL.revokeObjectURL(old.src);
-    container.innerHTML = `
-      <img src="${url}" alt="Receipt preview"
-           class="border border-gray-700 shadow-lg rounded bg-white"
-           style="width: min(384px, 100%); height: auto; display: block; margin: 0 auto; image-rendering: pixelated;"
-           onerror="document.getElementById('previewErr').textContent='Image failed to render — check server logs'; document.getElementById('previewErr').classList.remove('hidden'); this.remove();">
-    `;
-  } catch (e) {
-    container.innerHTML = '';
-    errEl.textContent = e.message;
-    errEl.classList.remove('hidden');
-  }
-}
-
-async function saveReceiptFormat() {
-  const fmtSaved = document.getElementById('fmtSaved');
-  const errEl    = document.getElementById('previewErr');
-  errEl.classList.add('hidden');
-  fmtSaved.classList.add('hidden');
-  try {
-    await api('/settings', { method: 'PATCH', body: JSON.stringify({ settings: _fmtFromControls() }) });
-    fmtSaved.classList.remove('hidden');
-    setTimeout(() => fmtSaved.classList.add('hidden'), 2000);
-  } catch (e) {
-    errEl.textContent = e.message;
-    errEl.classList.remove('hidden');
-  }
-}
-
-// ── Logo ──────────────────────────────────────────────────────────────────────
-
-async function uploadLogo(input) {
-  const file = input.files[0];
-  if (!file) return;
-  const statusEl = document.getElementById('logoStatus');
-  statusEl.textContent = 'Uploading…';
-  const form = new FormData();
-  form.append('file', file);
-  try {
-    const res = await fetch('/settings/logo', {
-      method: 'POST',
-      headers: { 'X-Admin-Key': getKey() },
-      body: form,
-    });
-    if (!res.ok) throw new Error(`${res.status}: ${await res.text().catch(() => res.statusText)}`);
-    statusEl.textContent = 'Logo saved.';
-    await loadSettings();
-  } catch (e) {
-    statusEl.textContent = e.message;
-  }
-  input.value = '';
-}
-
-async function removeLogo() {
-  const statusEl = document.getElementById('logoStatus');
-  try {
-    await api('/settings/logo', { method: 'DELETE' });
-    statusEl.textContent = 'Logo removed.';
-    await loadSettings();
-  } catch (e) {
-    statusEl.textContent = e.message;
-  }
-}
-
 // ── Per-message actions ───────────────────────────────────────────────────────
+
+function _showActionMsg(text) {
+  const el = document.getElementById('actionMsg');
+  el.textContent = text;
+  el.classList.remove('hidden');
+  setTimeout(() => el.classList.add('hidden'), 4000);
+}
 
 async function printMsg(id) {
   try {
     await api(`/print/${id}`, { method: 'POST' });
     await loadMessages();
   } catch (e) {
-    alert(e.message);
+    _showActionMsg(e.message);
   }
 }
 
@@ -642,7 +378,7 @@ async function skipMsg(id) {
     await api(`/skip/${id}`, { method: 'POST' });
     await loadMessages();
   } catch (e) {
-    alert(e.message);
+    _showActionMsg(e.message);
   }
 }
 
