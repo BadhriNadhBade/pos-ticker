@@ -20,17 +20,17 @@ Optional env (override runtime-editable defaults):
 """
 
 from contextlib import asynccontextmanager, contextmanager
-import base64, datetime, io, json, logging, os, queue, re, sqlite3, smtplib, ssl, threading, unicodedata
+import datetime, json, logging, os, queue, re, sqlite3, smtplib, ssl, threading, unicodedata
 from email.mime.text import MIMEText
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, Depends, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 from escpos.printer import Usb, Network
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageFont
 from pilmoji import Pilmoji
 from prometheus_fastapi_instrumentator import Instrumentator
 from prometheus_client import Counter, Gauge
@@ -69,7 +69,6 @@ _DEFAULTS: dict[str, str] = {
     "printer_host":           os.environ.get("PRINTER_HOST",           ""),
     "printer_port":           os.environ.get("PRINTER_PORT",           "9100"),
     "email_notifications":    os.environ.get("EMAIL_NOTIFICATIONS",    "true"),
-    "receipt_header":         os.environ.get("RECEIPT_HEADER",         ""),
     "receipt_font":           os.environ.get("RECEIPT_FONT",           "serif"),
     "receipt_font_size":      os.environ.get("RECEIPT_FONT_SIZE",      "22"),
     "receipt_show_timestamp": os.environ.get("RECEIPT_SHOW_TIMESTAMP", "true"),
@@ -77,7 +76,6 @@ _DEFAULTS: dict[str, str] = {
     "receipt_show_id":        os.environ.get("RECEIPT_SHOW_ID",        "true"),
     "receipt_title":          os.environ.get("RECEIPT_TITLE",          ""),
     "receipt_footer":         os.environ.get("RECEIPT_FOOTER",         ""),
-    "receipt_style":          os.environ.get("RECEIPT_STYLE",          "compact"),
 }
 
 _cfg: dict[str, str] = {}
@@ -374,25 +372,6 @@ def _render_message_image(text: str, font_size: int = 22, font_path: str = None)
     return img.convert("L").point(lambda x: 0 if x < 200 else 255).convert("1")
 
 
-def _load_logo() -> "Image.Image | None":
-    b64 = setting("receipt_logo")
-    if not b64:
-        return None
-    try:
-        data = base64.b64decode(b64)
-        img  = Image.open(io.BytesIO(data)).convert("RGB")
-        logo_h = max(1, int(PRINTER_WIDTH_PX * img.height / img.width))
-        return img.resize((PRINTER_WIDTH_PX, logo_h), Image.LANCZOS)
-    except Exception:
-        return None
-
-
-def _bool_fmt(val, setting_key: str) -> bool:
-    if val is not None:
-        return str(val).lower() != "false"
-    return setting(setting_key).lower() != "false"
-
-
 # ── Receipt fonts ─────────────────────────────────────────────────────────────
 
 _RECEIPT_FONTS = {
@@ -400,178 +379,6 @@ _RECEIPT_FONTS = {
     "sans":  "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     "serif": "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
 }
-
-
-def _render_receipt_preview(
-    name: str,
-    email: str,
-    message: str,
-    ts: str = "",
-    fmt: dict = None,
-) -> Image.Image:
-    fmt = fmt or {}
-
-    # ── Settings ──────────────────────────────────────────────────────────────
-    try:
-        font_size = max(10, min(40, int(fmt.get("receipt_font_size") or setting("receipt_font_size") or 18)))
-    except (ValueError, TypeError):
-        font_size = 18
-
-    font_key  = fmt.get("receipt_font") or setting("receipt_font") or "mono"
-    font_path = _RECEIPT_FONTS.get(font_key)
-
-    try:
-        font = ImageFont.truetype(font_path, font_size) if font_path else _load_font(font_size)
-    except Exception:
-        font = _load_font(font_size)
-
-    sm_size = max(10, font_size - 4)
-    try:
-        sm_font = ImageFont.truetype(font_path, sm_size) if font_path else _load_font(sm_size)
-    except Exception:
-        sm_font = _load_font(sm_size)
-
-    lbl_size = max(8, font_size - 6)
-    try:
-        lbl_font = ImageFont.truetype(font_path, lbl_size) if font_path else _load_font(lbl_size)
-    except Exception:
-        lbl_font = _load_font(lbl_size)
-
-    title_size = min(font_size + 8, 36)
-    try:
-        title_font = ImageFont.truetype(font_path, title_size) if font_path else _load_font(title_size)
-    except Exception:
-        title_font = _load_font(title_size)
-
-    w          = PRINTER_WIDTH_PX
-    line_h     = font_size + 8
-    sm_lh      = sm_size  + 6
-    lbl_lh     = lbl_size + 4
-    title_lh   = title_size + 10
-    thick_h    = 6    # thick rule band height
-    thin_h     = 10   # thin rule band height
-    pad        = 8    # left/right margin in px
-
-    title_text  = (fmt.get("receipt_title")  or setting("receipt_title")  or "New message").strip()
-    footer_text = (fmt.get("receipt_footer") or setting("receipt_footer") or "Thank you").strip()
-    show_ts     = _bool_fmt(fmt.get("receipt_show_timestamp"), "receipt_show_timestamp")
-    show_email  = _bool_fmt(fmt.get("receipt_show_email"),     "receipt_show_email")
-    show_id     = _bool_fmt(fmt.get("receipt_show_id"),        "receipt_show_id")
-
-    logo_img = _load_logo()
-
-    if not ts:
-        ts = datetime.datetime.now(PACIFIC).strftime("%a  %b %-d  %-I:%M %p")
-
-    ts_parts = ts.rsplit("  ", 1)
-    ts_date  = ts_parts[0].strip()
-    ts_time  = ts_parts[1].strip() if len(ts_parts) > 1 else ""
-    ts_line  = (ts_date + "  ·  " + ts_time) if ts_time else ts_date
-
-    msg_img = _render_message_image(message, font_size=font_size, font_path=font_path)
-
-    # ── Helper: text width ────────────────────────────────────────────────────
-    def _tw(f, t: str) -> int:
-        try:
-            bbox = f.getbbox(t)
-            return bbox[2] - bbox[0]
-        except Exception:
-            return len(t) * (getattr(f, "size", font_size) // 2)
-
-    # ── Build ops list ────────────────────────────────────────────────────────
-    # Each op: (type, payload, height_px)
-    ops: list[tuple] = []
-
-    def _gap(px: int = 4):          ops.append(("gap",       None,           px))
-    def _thick_rule():               ops.append(("thick",     None,           thick_h))
-    def _thin_rule():                ops.append(("thin",      None,           thin_h))
-    def _title(t: str):              ops.append(("title",     t,              title_lh))
-    def _subtitle(t: str):           ops.append(("subtitle",  t,              sm_lh))
-    def _kv(label: str, value: str): ops.append(("kv",        (label, value), line_h))
-    def _sec_label(t: str):          ops.append(("sec_label", t,              lbl_lh))
-    def _msg(img: Image.Image):      ops.append(("message",   img,            img.height))
-    def _footer(t: str):             ops.append(("footer",    t,              sm_lh))
-
-    _thick_rule()
-    _gap(6)
-    _title(title_text.upper())
-    if show_ts:
-        _subtitle(ts_line)
-    _gap(4)
-    _thin_rule()
-
-    _kv("FROM",  _truncate_to_width(name, 24))
-    if show_email:
-        _kv("EMAIL", _truncate_to_width(email, 24))
-
-    _thin_rule()
-    _sec_label("MESSAGE")
-    _gap(2)
-    _msg(msg_img)
-    _gap(2)
-    _thin_rule()
-
-    if show_id:
-        _kv("#", "#1  (preview)")
-
-    _thick_rule()
-    _gap(6)
-    _footer(footer_text.upper())
-    _gap(16)
-
-    # ── Compute total height ──────────────────────────────────────────────────
-    logo_h  = logo_img.height if logo_img else 0
-    total_h = 16 + logo_h + sum(h for _, _, h in ops)
-
-    img  = Image.new("RGB", (w, total_h), "white")
-    draw = ImageDraw.Draw(img)
-    y    = 16
-
-    if logo_img:
-        img.paste(logo_img, (0, y))
-        y += logo_h
-
-    for op_type, payload, op_h in ops:
-        mid_y = y + op_h // 2
-
-        if op_type == "gap":
-            pass
-
-        elif op_type == "thick":
-            draw.rectangle([(0, y), (w, y + thick_h - 1)], fill="#111")
-
-        elif op_type == "thin":
-            draw.line([(pad, mid_y), (w - pad, mid_y)], fill="#ccc", width=1)
-
-        elif op_type == "title":
-            tw = _tw(title_font, payload)
-            draw.text((max(pad, (w - tw) // 2), y), payload, fill="#111", font=title_font)
-
-        elif op_type == "subtitle":
-            tw = _tw(sm_font, payload)
-            draw.text((max(pad, (w - tw) // 2), y), payload, fill="#999", font=sm_font)
-
-        elif op_type == "kv":
-            label, value = payload
-            # Label: fixed muted caps
-            draw.text((pad, y), label, fill="#bbb", font=lbl_font)
-            # Value: right side
-            vw = _tw(font, value)
-            draw.text((w - pad - vw, y), value, fill="#111", font=font)
-
-        elif op_type == "sec_label":
-            draw.text((pad, y), payload.upper(), fill="#bbb", font=lbl_font)
-
-        elif op_type == "message":
-            img.paste(payload.convert("RGB"), (0, y))
-
-        elif op_type == "footer":
-            tw = _tw(sm_font, payload)
-            draw.text((max(pad, (w - tw) // 2), y), payload, fill="#999", font=sm_font)
-
-        y += op_h
-
-    return img
 
 
 # ── UTC → Pacific ─────────────────────────────────────────────────────────────
@@ -602,7 +409,6 @@ def _do_print(row) -> None:
     show_id     = setting("receipt_show_id").lower()        != "false"
     font_size   = _int_setting("receipt_font_size", 22)
     font_path   = _RECEIPT_FONTS.get(setting("receipt_font"))
-    logo        = _load_logo()
 
     ts      = row["browser_time"] or _utc_to_pacific(row["received_at"])
     name    = row["name"]
@@ -629,18 +435,8 @@ def _do_print(row) -> None:
         gap       = max(1, lw - col - len(value_out))
         return label_out + " " * gap + value_out + "\n"
 
-    def _center(text: str) -> str:
-        text = _truncate_to_width(text, lw)
-        pad  = max(0, (lw - _visual_len(text)) // 2)
-        return " " * pad + text + "\n"
-
     p = _get_printer()
     try:
-        # ── Logo ──────────────────────────────────────────────────────────────
-        if logo:
-            p.image(logo.convert("L").point(lambda x: 0 if x < 128 else 255).convert("1"))
-            p.ln(1)
-
         # ── Thick rule ────────────────────────────────────────────────────────
         p.set(bold=True)
         p.text(thick + "\n")
@@ -851,9 +647,7 @@ async def list_messages(limit: int = 50, offset: int = 0):
 @app.get("/settings", dependencies=[Depends(require_admin)])
 async def get_settings():
     with _cfg_lock:
-        result = {k: v for k, v in _cfg.items() if k != "receipt_logo"}
-        result["receipt_logo_set"] = bool(_cfg.get("receipt_logo"))
-    return result
+        return dict(_cfg)
 
 
 class SettingsPatch(BaseModel):
@@ -884,73 +678,7 @@ async def patch_settings(body: SettingsPatch):
             )
     _reload_cfg()
     with _cfg_lock:
-        result = {k: v for k, v in _cfg.items() if k != "receipt_logo"}
-        result["receipt_logo_set"] = bool(_cfg.get("receipt_logo"))
-    return result
-
-
-_LOGO_MAX_BYTES = 5 * 1024 * 1024
-
-
-@app.post("/settings/logo", dependencies=[Depends(require_admin)])
-async def upload_logo(file: UploadFile = File(...)):
-    data = await file.read(_LOGO_MAX_BYTES + 1)
-    if len(data) > _LOGO_MAX_BYTES:
-        raise HTTPException(400, "Image too large (max 5 MB)")
-    try:
-        img = Image.open(io.BytesIO(data))
-        img.verify()
-    except Exception:
-        raise HTTPException(400, "Invalid image file")
-    img = Image.open(io.BytesIO(data)).convert("RGB")
-    buf = io.BytesIO()
-    img.save(buf, format="PNG", optimize=True)
-    b64 = base64.b64encode(buf.getvalue()).decode()
-    now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-    with get_db() as c:
-        c.execute(
-            "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)"
-            " ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
-            ("receipt_logo", b64, now),
-        )
-    _reload_cfg()
-    return {"ok": True}
-
-
-@app.delete("/settings/logo", dependencies=[Depends(require_admin)])
-async def delete_logo():
-    with get_db() as c:
-        c.execute("DELETE FROM settings WHERE key='receipt_logo'")
-    _reload_cfg()
-    return {"ok": True}
-
-
-@app.get("/settings/logo", dependencies=[Depends(require_admin)])
-async def get_logo():
-    b64 = setting("receipt_logo")
-    if not b64:
-        raise HTTPException(404, "no logo set")
-    data = base64.b64decode(b64)
-    return Response(content=data, media_type="image/png")
-
-
-@app.post("/receipt/preview", dependencies=[Depends(require_admin)])
-async def receipt_preview(request: Request):
-    data    = await request.json()
-    name    = (data.get("name",    "Ada Lovelace")    or "Ada Lovelace").strip()[:64]
-    email   = (data.get("email",   "ada@example.com") or "ada@example.com").strip()[:64]
-    message = (data.get("message", "Hello from your website!") or "Hello!").strip()[:150]
-    ts      = (data.get("browser_time", "") or "").strip()
-    fmt     = data.get("fmt") or {}
-    try:
-        img = _render_receipt_preview(name, email, message, ts, fmt)
-    except Exception as exc:
-        logger.error("receipt preview render failed: %s", exc)
-        raise HTTPException(500, f"Render failed: {exc}")
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    buf.seek(0)
-    return Response(content=buf.getvalue(), media_type="image/png")
+        return dict(_cfg)
 
 
 @app.post("/contact")
