@@ -105,6 +105,10 @@ def _reload_cfg():
         _cfg.update(merged)
 
 
+def _utc_now_string() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
 # ── Prometheus metrics ────────────────────────────────────────────────────────
 
 _msg_counter   = Counter("printer_messages_total", "Contact form submissions", ["result"])
@@ -142,6 +146,7 @@ def _setup_otel(app):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _init_db()
+    _release_stale_print_claims()
     _reload_cfg()
     threading.Thread(target=_printer_worker, daemon=True, name="printer-worker").start()
     if not ADMIN_KEY:
@@ -235,9 +240,28 @@ def _init_db():
             pass
 
 
+def _release_stale_print_claims() -> None:
+    with get_db() as c:
+        released = c.execute(
+            "UPDATE messages SET claimed=0 WHERE printed_at IS NULL AND claimed=1"
+        ).rowcount
+    if released:
+        logger.warning("released %d stale in-flight print claim(s)", released)
+
+
 def _prints_this_hour(c) -> int:
     return c.execute(
         "SELECT COUNT(*) FROM messages WHERE printed_at >= datetime('now','-1 hour')"
+    ).fetchone()[0]
+
+
+def _print_slots_used_this_hour(c) -> int:
+    return c.execute(
+        """
+        SELECT COUNT(*) FROM messages
+        WHERE printed_at >= datetime('now','-1 hour')
+           OR (printed_at IS NULL AND claimed=1)
+        """
     ).fetchone()[0]
 
 
@@ -509,7 +533,7 @@ def _printer_worker():
             with get_db() as c:
                 c.execute(
                     "UPDATE messages SET printed_at=?, claimed=0 WHERE id=?",
-                    (datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), msg_id),
+                    (_utc_now_string(), msg_id),
                 )
             _print_counter.labels(result="success").inc()
             _printer_up.set(1)
@@ -668,7 +692,7 @@ async def patch_settings(body: SettingsPatch):
                 int(value)
             except ValueError:
                 raise HTTPException(400, f"Setting '{key}' must be an integer")
-    now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    now = _utc_now_string()
     with get_db() as c:
         for key, value in body.settings.items():
             c.execute(
@@ -709,7 +733,7 @@ async def contact(request: Request):
 
     ua        = request.headers.get("User-Agent", "unknown")[:120]
     headers   = json.dumps(dict(request.headers))
-    timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = _utc_now_string()
     max_ip    = _int_setting("max_per_ip_hour", 3)
     limit     = _int_setting("prints_per_hour", 10)
 
@@ -724,18 +748,20 @@ async def contact(request: Request):
             (name, email, message, ip, ua, timestamp, browser_time or None, headers),
         )
         msg_id     = cursor.lastrowid
-        hour_count = _prints_this_hour(c)
+        slots_used = _print_slots_used_this_hour(c)
+
+        if slots_used >= limit:
+            row = None
+        else:
+            c.execute("UPDATE messages SET claimed=1 WHERE id=?", (msg_id,))
+            row = c.execute("SELECT * FROM messages WHERE id=?", (msg_id,)).fetchone()
 
     _send_email(name, email, message, ip, browser_time or _utc_to_pacific(timestamp))
 
-    if hour_count >= limit:
-        logger.info("hourly limit hit (%d), message %d queued", hour_count, msg_id)
+    if row is None:
+        logger.info("hourly limit hit (%d/%d), message %d left pending", slots_used, limit, msg_id)
         _msg_counter.labels(result="rate_limited_global").inc()
         return JSONResponse({"ok": True, "queued": True})
-
-    with get_db() as c:
-        c.execute("UPDATE messages SET claimed=1 WHERE id=?", (msg_id,))
-        row = c.execute("SELECT * FROM messages WHERE id=?", (msg_id,)).fetchone()
 
     _msg_counter.labels(result="accepted").inc()
     _queue_gauge.inc()
