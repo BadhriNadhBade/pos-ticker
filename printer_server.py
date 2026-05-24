@@ -429,12 +429,10 @@ def _do_print(row) -> None:
 
     # ── Resolve settings ──────────────────────────────────────────────────────
     title_text  = (setting("receipt_title").strip()  or "NEW MESSAGE").upper()
-    footer_text = (setting("receipt_footer").strip() or "THANK YOU").upper()
+    footer_text = setting("receipt_footer").strip().upper()
     show_ts     = setting("receipt_show_timestamp").lower() != "false"
     show_email  = setting("receipt_show_email").lower()     != "false"
     show_id     = setting("receipt_show_id").lower()        != "false"
-    font_size   = _int_setting("receipt_font_size", 22)
-    font_path   = _RECEIPT_FONTS.get(setting("receipt_font"))
 
     ts      = row["browser_time"] or _utc_to_pacific(row["received_at"])
     name    = row["name"]
@@ -489,10 +487,11 @@ def _do_print(row) -> None:
         if show_email:
             p.text(_kv("EMAIL", email))
 
-        # ── Message block ─────────────────────────────────────────────────────
+        # ── Message block (native printer font, same as header) ───────────────
         p.text(thin + "\n")
         p.text("MSG\n")
-        p.image(_render_message_image(message, font_size=font_size, font_path=font_path))
+        for line in _wrap_text(message, lw):
+            p.text(line + "\n")
 
         # ── Meta ──────────────────────────────────────────────────────────────
         p.text(thin + "\n")
@@ -503,13 +502,14 @@ def _do_print(row) -> None:
         p.set(bold=True)
         p.text(thick + "\n")
         p.set(bold=False)
-        p.ln(1)
 
-        # ── Footer ────────────────────────────────────────────────────────────
-        p.set(align="center")
-        p.text(_truncate_to_width(footer_text, lw) + "\n")
-        p.set(align="left")
-        p.ln(4)
+        # ── Footer (only if configured) ───────────────────────────────────────
+        if footer_text:
+            p.ln(1)
+            p.set(align="center")
+            p.text(_truncate_to_width(footer_text, lw) + "\n")
+            p.set(align="left")
+        p.ln(2)
         p.cut()
 
     finally:
