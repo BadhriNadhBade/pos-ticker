@@ -699,7 +699,7 @@ async def patch_settings(body: SettingsPatch):
 
 
 # ── Contact input validation ──────────────────────────────────────────────────
-MAX_MESSAGE_CHARS = 150
+MAX_MESSAGE_CHARS = 300
 _KB_ROWS = ("qwertyuiop", "asdfghjkl", "zxcvbnm")
 
 
