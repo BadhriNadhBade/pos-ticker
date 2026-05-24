@@ -447,7 +447,6 @@ def _do_print(row) -> None:
     ts_line  = (ts_date + "  .  " + ts_time) if ts_time else ts_date
 
     # ── Helpers ───────────────────────────────────────────────────────────────
-    thick = "=" * lw          # thick rule  ════
     thin  = "-" * lw          # thin rule   ────
 
     def _kv(label: str, value: str) -> str:
@@ -461,12 +460,6 @@ def _do_print(row) -> None:
 
     p = _get_printer()
     try:
-        # ── Thick rule ────────────────────────────────────────────────────────
-        p.set(bold=True)
-        p.text(thick + "\n")
-        p.set(bold=False)
-        p.ln(1)
-
         # ── Title (centred, bold) ─────────────────────────────────────────────
         p.set(align="center", bold=True)
         p.text(_truncate_to_width(title_text, lw) + "\n")
@@ -487,21 +480,19 @@ def _do_print(row) -> None:
         if show_email:
             p.text(_kv("EMAIL", email))
 
-        # ── Message block (native printer font, same as header) ───────────────
+        # ── Message block (bold, same weight as header) ───────────────────────
         p.text(thin + "\n")
-        p.text("MSG\n")
+        p.set(bold=True)
         for line in _wrap_text(message, lw):
             p.text(line + "\n")
+        p.set(bold=False)
 
-        # ── Meta ──────────────────────────────────────────────────────────────
+        # ── Meta (id centred) ─────────────────────────────────────────────────
         p.text(thin + "\n")
         if show_id:
-            p.text(_kv("#", str(msg_id)))
-
-        # ── Thick rule ────────────────────────────────────────────────────────
-        p.set(bold=True)
-        p.text(thick + "\n")
-        p.set(bold=False)
+            p.set(align="center")
+            p.text("#" + str(msg_id) + "\n")
+            p.set(align="left")
 
         # ── Footer (only if configured) ───────────────────────────────────────
         if footer_text:
@@ -509,7 +500,7 @@ def _do_print(row) -> None:
             p.set(align="center")
             p.text(_truncate_to_width(footer_text, lw) + "\n")
             p.set(align="left")
-        p.ln(2)
+        p.ln(1)
         p.cut()
 
     finally:
