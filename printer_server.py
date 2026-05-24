@@ -393,7 +393,9 @@ def _render_message_image(text: str, font_size: int = 22, font_path: str = None)
         for ln in lines:
             pj.text((0, y), ln, fill="black", font=font)
             y += line_height
-    return img.convert("L").point(lambda x: 0 if x < 200 else 255).convert("1")
+    # grayscale via Floyd-Steinberg dithering: colour emoji print as shaded dot
+    # patterns (keeps their light/dark detail) while text stays crisp solid black
+    return img.convert("L").convert("1")
 
 
 # ── Receipt fonts ─────────────────────────────────────────────────────────────
@@ -476,16 +478,33 @@ def _do_print(row) -> None:
         p.text(thin + "\n")
 
         # ── Key/value rows ────────────────────────────────────────────────────
-        p.text(_kv("FROM",  name))
+        p.text(_kv("FROM",  _strip_emoji(name)))
         if show_email:
             p.text(_kv("EMAIL", email))
 
-        # ── Message block (bold, same weight as header) ───────────────────────
+        # ── Message block ─────────────────────────────────────────────────────
         p.text(thin + "\n")
-        p.set(bold=True)
-        for line in _wrap_text(message, lw):
-            p.text(line + "\n")
-        p.set(bold=False)
+        if _has_emoji(message):
+            # thermal codepage can't encode emoji → render the line as an image
+            try:
+                font_path = _RECEIPT_FONTS.get(setting("receipt_font"), _RECEIPT_FONTS["receipt"])
+                p.image(_render_message_image(
+                    message,
+                    font_size=_int_setting("receipt_font_size", 22),
+                    font_path=font_path,
+                ))
+            except Exception as exc:
+                logger.warning("emoji image render failed (%s); printing without emoji", exc)
+                p.set(bold=True)
+                for line in _wrap_text(_strip_emoji(message), lw):
+                    p.text(line + "\n")
+                p.set(bold=False)
+        else:
+            # bold native font, same weight as the header
+            p.set(bold=True)
+            for line in _wrap_text(message, lw):
+                p.text(line + "\n")
+            p.set(bold=False)
 
         # ── Meta (id centred) ─────────────────────────────────────────────────
         p.text(thin + "\n")
@@ -734,16 +753,25 @@ def _looks_gibberish(s: str) -> bool:
 
 
 _ALLOWED_EMOJI = ("\U0001F525", "\U0001F44D")  # 🔥 👍 count as real content
+# base pictograph ranges (skin-tone modifiers live in _EMOJI_TRAIL, not here)
+_EMOJI_BASE  = "\U0001F300-\U0001F3FA\U0001F400-\U0001FAFF\U00002600-\U000027BF\U00002B00-\U00002BFF\U0001F1E6-\U0001F1FF"
+_EMOJI_TRAIL = "\U0001F3FB-\U0001F3FF\U0000FE0F\U0000200D"
+_EMOJI_CHAR_RE = re.compile(f"[{_EMOJI_BASE}]")
 # one emoji unit = a base pictograph plus any skin-tone / ZWJ / variation selectors
-_EMOJI_RUN_RE = re.compile(
-    "(?:[\U0001F300-\U0001F3FA\U0001F400-\U0001FAFF\U00002600-\U000027BF\U00002B00-\U00002BFF\U0001F1E6-\U0001F1FF]"
-    "[\U0001F3FB-\U0001F3FF\U0000FE0F\U0000200D]*){5,}"
-)
+_EMOJI_RUN_RE  = re.compile(f"(?:[{_EMOJI_BASE}][{_EMOJI_TRAIL}]*){{5,}}")
 
 
 def _has_content(s: str) -> bool:
     """Real text, or at least one allowed emoji (🔥 / 👍)."""
     return _has_letters(s) or any(e in s for e in _ALLOWED_EMOJI)
+
+
+def _has_emoji(s: str) -> bool:
+    return bool(_EMOJI_CHAR_RE.search(s))
+
+
+def _strip_emoji(s: str) -> str:
+    return re.sub(r"\s{2,}", " ", re.sub(f"[{_EMOJI_BASE}{_EMOJI_TRAIL}]", "", s)).strip()
 
 
 def _too_many_emoji(s: str) -> bool:
