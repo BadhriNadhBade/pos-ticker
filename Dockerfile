@@ -35,6 +35,7 @@ COPY --from=builder /install /usr/local
 
 COPY --chown=appuser:appuser printer_server.py .
 COPY --chown=appuser:appuser static/ static/
+COPY --chown=appuser:appuser merchant-copy.ttf .
 
 ENV DB_PATH=/app/data/messages.db
 RUN mkdir -p /app/data && chown appuser:appuser /app/data

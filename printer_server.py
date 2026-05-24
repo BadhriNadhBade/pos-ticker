@@ -69,7 +69,7 @@ _DEFAULTS: dict[str, str] = {
     "printer_host":           os.environ.get("PRINTER_HOST",           ""),
     "printer_port":           os.environ.get("PRINTER_PORT",           "9100"),
     "email_notifications":    os.environ.get("EMAIL_NOTIFICATIONS",    "true"),
-    "receipt_font":           os.environ.get("RECEIPT_FONT",           "serif"),
+    "receipt_font":           os.environ.get("RECEIPT_FONT",           "receipt"),
     "receipt_font_size":      os.environ.get("RECEIPT_FONT_SIZE",      "22"),
     "receipt_show_timestamp": os.environ.get("RECEIPT_SHOW_TIMESTAMP", "true"),
     "receipt_show_email":     os.environ.get("RECEIPT_SHOW_EMAIL",     "true"),
@@ -399,9 +399,11 @@ def _render_message_image(text: str, font_size: int = 22, font_path: str = None)
 # ── Receipt fonts ─────────────────────────────────────────────────────────────
 
 _RECEIPT_FONTS = {
-    "mono":  "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-    "sans":  "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "serif": "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+    # Merchant Copy — the classic thermal "store receipt" typeface (bundled with the app).
+    "receipt": str(Path(__file__).parent / "merchant-copy.ttf"),
+    "mono":    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+    "sans":    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "serif":   "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
 }
 
 
