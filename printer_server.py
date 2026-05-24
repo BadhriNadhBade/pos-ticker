@@ -698,6 +698,59 @@ async def patch_settings(body: SettingsPatch):
         return dict(_cfg)
 
 
+# ── Contact input validation ──────────────────────────────────────────────────
+MAX_MESSAGE_CHARS = 150
+_KB_ROWS = ("qwertyuiop", "asdfghjkl", "zxcvbnm")
+
+
+def _has_letters(s: str) -> bool:
+    """At least one real letter (any script) — rejects symbol/emoji/digit-only input."""
+    return any(ch.isalpha() for ch in s)
+
+
+def _is_keyboard_walk(word: str) -> bool:
+    """Whole token is a straight keyboard run, e.g. 'asdf', 'qwerty', 'lkjh'."""
+    return any(word in row or word in row[::-1] for row in _KB_ROWS)
+
+
+def _looks_gibberish(s: str) -> bool:
+    t = s.strip()
+    if not t:
+        return False
+    # 5+ of the same character in a row: "aaaaa", "!!!!!", "......"
+    if re.search(r"(.)\1{4,}", t):
+        return True
+    for raw in t.split():
+        word = re.sub(r"[^a-z]", "", raw.lower())          # latin letters only
+        if len(word) < 4:
+            continue                                       # skip short / non-latin tokens
+        if _is_keyboard_walk(word):                        # "asdf", "qwerty"
+            return True
+        if len(word) >= 6 and re.fullmatch(r"(.{2,4})\1+", word):  # "qweqwe", "asdfasdf"
+            return True
+        if len(word) >= 5 and not re.search(r"[aeiouy]", word):    # long run with no vowels
+            return True
+    return False
+
+
+_ALLOWED_EMOJI = ("\U0001F525", "\U0001F44D")  # 🔥 👍 count as real content
+# one emoji unit = a base pictograph plus any skin-tone / ZWJ / variation selectors
+_EMOJI_RUN_RE = re.compile(
+    "(?:[\U0001F300-\U0001F3FA\U0001F400-\U0001FAFF\U00002600-\U000027BF\U00002B00-\U00002BFF\U0001F1E6-\U0001F1FF]"
+    "[\U0001F3FB-\U0001F3FF\U0000FE0F\U0000200D]*){5,}"
+)
+
+
+def _has_content(s: str) -> bool:
+    """Real text, or at least one allowed emoji (🔥 / 👍)."""
+    return _has_letters(s) or any(e in s for e in _ALLOWED_EMOJI)
+
+
+def _too_many_emoji(s: str) -> bool:
+    """Five or more emojis in a row."""
+    return bool(_EMOJI_RUN_RE.search(s))
+
+
 @app.post("/contact")
 async def contact(request: Request):
     try:
@@ -707,13 +760,21 @@ async def contact(request: Request):
 
     name         = (data.get("name",         "") or "").strip()[:64]
     email        = (data.get("email",        "") or "").strip()[:64]
-    message      = (data.get("message",      "") or "").strip()[:500]
+    message      = (data.get("message",      "") or "").strip()[:1000]
     browser_time = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', (data.get("browser_time", "") or "").strip())[:64]
 
     if not (name and email and message):
         return JSONResponse({"error": "missing fields"}, status_code=400)
     if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
         return JSONResponse({"error": "invalid email"}, status_code=400)
+    if len(message) > MAX_MESSAGE_CHARS:
+        return JSONResponse({"error": f"message too long (max {MAX_MESSAGE_CHARS} characters)"}, status_code=400)
+    if _too_many_emoji(name) or _too_many_emoji(message):
+        return JSONResponse({"error": "too many emojis in a row"}, status_code=400)
+    if not _has_content(name) or _looks_gibberish(name):
+        return JSONResponse({"error": "invalid name"}, status_code=400)
+    if not _has_content(message) or _looks_gibberish(message):
+        return JSONResponse({"error": "message must contain real words"}, status_code=400)
 
     if TRUST_PROXY:
         ip = (
