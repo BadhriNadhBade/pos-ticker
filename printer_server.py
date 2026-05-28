@@ -189,6 +189,26 @@ async def cors(request: Request, call_next):
     return response
 
 
+# ── Public surface gate (Cloudflare tunnel) ──────────────────────────────────
+# Requests arriving through the Cloudflare tunnel carry a CF-Ray header that
+# Cloudflare always injects on its edge. Public visitors cannot forge it from
+# outside the tunnel. Direct LAN / Tailscale / localhost traffic never has it.
+#
+# We use that header as the trust boundary: through the tunnel, only the two
+# contact-form endpoints exist; everything else (admin UI, /docs, /openapi.json,
+# /metrics, /queue, /messages, /settings, /print, /skip, /drain, /health) is
+# reachable only on the private network.
+
+_PUBLIC_PATHS = frozenset({"/contact", "/contact/count"})
+
+
+@app.middleware("http")
+async def public_surface_gate(request: Request, call_next):
+    if request.headers.get("CF-Ray") and request.url.path not in _PUBLIC_PATHS:
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
+    return await call_next(request)
+
+
 # ── Database ──────────────────────────────────────────────────────────────────
 
 @contextmanager
