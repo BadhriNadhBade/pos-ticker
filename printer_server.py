@@ -733,6 +733,16 @@ def _looks_gibberish(s: str) -> bool:
     return False
 
 
+@app.get("/contact/count")
+def contact_count():
+    """Total messages that actually printed (printed_at set by the worker on success)."""
+    with get_db() as c:
+        n = c.execute(
+            "SELECT COUNT(*) FROM messages WHERE printed_at IS NOT NULL"
+        ).fetchone()[0]
+    return {"printed": int(n)}
+
+
 @app.post("/contact")
 async def contact(request: Request):
     try:
@@ -745,9 +755,10 @@ async def contact(request: Request):
     message      = (data.get("message",      "") or "").strip()[:1000]
     browser_time = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', (data.get("browser_time", "") or "").strip())[:64]
 
-    if not (name and email and message):
+    if not (name and message):
         return JSONResponse({"error": "missing fields"}, status_code=400)
-    if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
+    # email is optional; validate format only when provided
+    if email and not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
         return JSONResponse({"error": "invalid email"}, status_code=400)
     if len(message) > MAX_MESSAGE_CHARS:
         return JSONResponse({"error": f"message too long (max {MAX_MESSAGE_CHARS} characters)"}, status_code=400)
