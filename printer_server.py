@@ -320,9 +320,15 @@ def _get_printer():
     host = setting("printer_host")
     port = _int_setting("printer_port", 9100)
 
+    if mode == "network" and not host:
+        raise RuntimeError("printer_mode is 'network' but printer_host is not set")
+
     if mode in ("network", "auto") and host:
         try:
             p = Network(host, port=port)
+            # escpos>=3.0 connects lazily — open() here so an unreachable
+            # printer raises now and we can fall back / surface the error.
+            p.open()
             _printer_mode_label = f"network:{host}:{port}"
             return p
         except Exception as exc:
@@ -331,6 +337,7 @@ def _get_printer():
                 raise
 
     p = Usb(PRINTER_VENDOR_ID, PRINTER_PRODUCT_ID, profile="default")
+    p.open()
     _printer_mode_label = f"usb:{PRINTER_VENDOR_ID:04x}:{PRINTER_PRODUCT_ID:04x}"
     return p
 
