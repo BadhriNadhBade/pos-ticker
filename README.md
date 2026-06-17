@@ -117,7 +117,7 @@ All settings can be changed at runtime via the admin UI (`/admin → Settings`) 
 | `PRINTER_PORT` | `9100` | ESC/POS TCP port |
 | `PRINTER_USB_VENDOR` | `0x0525` | USB vendor ID from `lsusb` |
 | `PRINTER_USB_PRODUCT` | `0xa700` | USB product ID from `lsusb` |
-| `PRINTER_WIDTH_PX` | `384` | Printable width in pixels (58 mm ≈ 384 px, 80 mm ≈ 576 px) |
+| `PRINTER_WIDTH_PX` | `576` | Printable width in pixels (80 mm ≈ 576 px, 58 mm ≈ 384 px) — must match the printer head, or images print narrower than the paper |
 
 ### Rate limits & CORS (runtime-editable)
 
@@ -125,7 +125,7 @@ All settings can be changed at runtime via the admin UI (`/admin → Settings`) 
 |---|---|---|
 | `PRINTS_PER_HOUR` | `10` | Global hourly print cap |
 | `MAX_PER_IP_HOUR` | `3` | Per-IP hourly submission cap |
-| `LINE_WIDTH` | `32` | Characters per line (32 for 58 mm, 48 for 80 mm) |
+| `LINE_WIDTH` | `48` | Characters per line (48 for 80 mm, 32 for 58 mm) |
 | `ALLOWED_ORIGIN` | `https://example.com` | CORS allowed origin for `/contact` |
 | `EMAIL_NOTIFICATIONS` | `true` | Toggle email on/off |
 
