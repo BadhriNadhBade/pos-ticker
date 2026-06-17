@@ -191,7 +191,7 @@ async def cors(request: Request, call_next):
     response.headers["X-Frame-Options"]              = "DENY"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        "img-src 'self' blob:; "
+        "img-src 'self' blob: data:; "
         "script-src 'self' https://cdn.tailwindcss.com 'unsafe-inline'; "
         "style-src 'self' 'unsafe-inline'"
     )
