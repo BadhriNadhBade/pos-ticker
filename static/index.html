@@ -151,6 +151,20 @@
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
   .toast.bad{background:#7d241b}
 
+  tbody tr.clickable{cursor:pointer}
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:flex-start;
+    justify-content:center;padding:40px 16px;overflow:auto;z-index:60}
+  .modal.hidden{display:none}
+  .modal-card{position:relative;background:var(--surface);border:1px solid var(--border);
+    border-radius:var(--r);max-width:620px;width:100%;padding:22px 24px}
+  .modal-x{position:absolute;top:8px;right:12px;border:none;background:none;font-size:24px;
+    line-height:1;cursor:pointer;color:var(--text-3)}
+  .modal-x:hover{color:var(--text)}
+  .modal-card h3{margin:0 0 2px;font-size:15px}
+  .detail-meta{color:var(--text-2);font-size:12px;margin-bottom:14px}
+  .detail-msg{white-space:pre-wrap;word-break:break-word;margin:0 0 16px;font-size:14px}
+  .detail-img{display:block;max-width:100%;border:1px solid var(--border);background:#fff;image-rendering:pixelated}
+
   .empty-row td{text-align:center;color:var(--text-3);padding:30px}
   .muted{color:var(--text-3)}
   .hidden{display:none!important}
@@ -282,6 +296,13 @@
 
 <div class="toast" id="toast"></div>
 
+<div class="modal hidden" id="detail">
+  <div class="modal-card">
+    <button class="modal-x" id="detail-x" aria-label="Close">&times;</button>
+    <div id="detail-body"></div>
+  </div>
+</div>
+
 <script>
 "use strict";
 /* ── admin key storage: sessionStorage, falling back to memory ── */
@@ -397,11 +418,13 @@ async function loadMessages(){
       const act=el("td","actions");
       const printable = !m.printed_at && m.claimed===0;
       if(printable){
-        const p=el("button","btn btn-sm","Print"); p.onclick=()=>act_print(m.id,p);
-        const s=el("button","btn btn-sm btn-danger","Skip"); s.style.marginLeft="6px"; s.onclick=()=>act_skip(m.id,s);
+        const p=el("button","btn btn-sm","Print"); p.onclick=e=>{e.stopPropagation(); act_print(m.id,p);};
+        const s=el("button","btn btn-sm btn-danger","Skip"); s.style.marginLeft="6px"; s.onclick=e=>{e.stopPropagation(); act_skip(m.id,s);};
         act.append(p,s);
       }
       tr.appendChild(act);
+      tr.classList.add("clickable");
+      tr.onclick=()=>openDetail(m);
       rows.appendChild(tr);
     }
     const start=total?page*PAGE+1:0, end=Math.min(total,(page+1)*PAGE);
@@ -413,6 +436,36 @@ async function loadMessages(){
     rows.innerHTML=`<tr class="empty-row"><td colspan="6">Could not load messages — ${e.message}</td></tr>`;
   }
 }
+let detailImgUrl=null;
+function closeDetail(){
+  $("#detail").classList.add("hidden");
+  if(detailImgUrl){ URL.revokeObjectURL(detailImgUrl); detailImgUrl=null; }
+}
+async function openDetail(m){
+  const [cls,label]=statusOf(m);
+  const body=$("#detail-body"); body.innerHTML="";
+  body.appendChild(el("h3",null,`#${m.id} · ${m.name||"—"}`));
+  const meta=el("div","detail-meta",fmtTime(m)+(m.email?" · "+m.email:""));
+  body.appendChild(meta);
+  const pill=el("span","pill "+cls,label); pill.style.display="inline-block"; pill.style.marginBottom="14px";
+  body.appendChild(pill);
+  body.appendChild(el("div","detail-msg",m.message||"—"));
+  $("#detail").classList.remove("hidden");
+  if(m.has_image){
+    const note=el("div","muted","Loading image…"); body.appendChild(note);
+    try{
+      const res=await fetch(`/messages/${m.id}/image`,{headers:{"X-Admin-Key":store.get()||""}});
+      if(!res.ok) throw new Error("HTTP "+res.status);
+      detailImgUrl=URL.createObjectURL(await res.blob());
+      const img=el("img","detail-img"); img.src=detailImgUrl; img.alt="attached image";
+      note.replaceWith(img);
+    }catch(e){ note.textContent="Could not load image — "+e.message; }
+  }
+}
+$("#detail-x").onclick=closeDetail;
+$("#detail").onclick=e=>{ if(e.target===$("#detail")) closeDetail(); };
+document.addEventListener("keydown",e=>{ if(e.key==="Escape" && !$("#detail").classList.contains("hidden")) closeDetail(); });
+
 async function act_print(id,btn){
   btn.disabled=true;
   try{ await api(`/print/${id}`,{method:"POST"}); toast(`Queued #${id} for printing`); refreshAll(); }

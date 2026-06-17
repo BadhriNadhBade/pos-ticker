@@ -841,6 +841,16 @@ async def list_messages(limit: int = 50, offset: int = 0):
     return {"total": total, "messages": [dict(r) for r in rows]}
 
 
+@app.get("/messages/{msg_id}/image", dependencies=[Depends(require_admin)])
+async def message_image(msg_id: int):
+    """Serve the stored 1-bit PNG raster (exactly what was / will be printed)."""
+    with get_db() as c:
+        row = c.execute("SELECT image FROM messages WHERE id=?", (msg_id,)).fetchone()
+    if row is None or row["image"] is None:
+        raise HTTPException(404, "no image")
+    return Response(content=row["image"], media_type="image/png")
+
+
 @app.get("/settings", dependencies=[Depends(require_admin)])
 async def get_settings():
     with _cfg_lock:
