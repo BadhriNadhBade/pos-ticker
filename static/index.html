@@ -322,6 +322,16 @@ function toast(msg, bad){
   clearTimeout(toast._t); toast._t=setTimeout(()=>t.className="toast",2600);
 }
 
+// FastAPI errors come back as {detail: ...}; for 422 `detail` is a list of
+// {msg, loc, ...} objects, so blindly using it as a string yields "[object Object]".
+function errMessage(data, status){
+  const d = data && typeof data==="object" ? (data.detail ?? data.error) : data;
+  if(typeof d==="string" && d) return d;
+  if(Array.isArray(d)) return d.map(e=>e&&e.msg ? e.msg : JSON.stringify(e)).join("; ");
+  if(d && typeof d==="object") return JSON.stringify(d);
+  return "HTTP "+status;
+}
+
 async function api(path, {method="GET", body=null}={}){
   const headers={"X-Admin-Key": store.get() || ""};
   if(body){ headers["Content-Type"]="application/json"; }
@@ -329,7 +339,7 @@ async function api(path, {method="GET", body=null}={}){
   if(res.status===401){ store.clear(); showGate("Key rejected. Try again."); throw new Error("unauthorized"); }
   const text = await res.text();
   let data; try{ data = text?JSON.parse(text):null; }catch{ data=text; }
-  if(!res.ok) throw new Error((data&&data.detail)||(data&&data.error)||("HTTP "+res.status));
+  if(!res.ok) throw new Error(errMessage(data, res.status));
   return data;
 }
 
@@ -515,7 +525,6 @@ function loadFile(file){
   if(file.size > 4*1024*1024){ toast("Image is larger than 4 MB",true); return; }
   const r=new FileReader();
   r.onload=()=>{
-    srcB64 = r.result.split(",")[1];
     const img=new Image();
     img.onload=()=>{
       srcImg=img;
@@ -575,11 +584,18 @@ $("#btn-clear").onclick=()=>{
   srcB64=null; srcImg=null; $("#file").value=""; $("#img-meta").textContent="";
   $("#btn-print").disabled=true; $("#btn-clear").disabled=true; renderPreview();
 };
+// Downscale to the printer's 576px width before sending: the server resizes to
+// the same width anyway, so this is lossless for the print yet shrinks a multi-MB
+// original to ~tens of KB — keeping the request body well under any size limit.
+function scaledB64(){
+  const {c}=fitCanvas();
+  return c.toDataURL("image/png").split(",")[1];
+}
 $("#btn-print").onclick=async()=>{
-  if(!srcB64) return;
+  if(!srcImg) return;
   const b=$("#btn-print"); b.disabled=true; const was=b.textContent; b.textContent="Printing…";
   try{
-    await api("/print/image",{method:"POST",body:{image_b64:srcB64,mode}});
+    await api("/print/image",{method:"POST",body:{image_b64:scaledB64(),mode}});
     toast(`Sent to printer (${mode})`); refreshStatus();
   }catch(e){ toast(e.message,true); }
   finally{ b.textContent=was; b.disabled=false; }
