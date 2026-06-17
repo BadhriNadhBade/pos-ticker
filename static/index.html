@@ -1,392 +1,612 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Printer Admin</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <style>
-    [x-cloak] { display: none; }
-    .fade { animation: fadeIn .2s ease; }
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
-  </style>
-</head>
-<body class="bg-gray-950 text-gray-100 min-h-screen font-mono text-sm">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Printer Server</title>
+<style>
+  :root{
+    --bg:#f4f4f4; --surface:#fff; --surface-2:#fafafa;
+    --border:#e3e3e3; --border-strong:#d2d2d2;
+    --text:#1a1a1a; --text-2:#5a5a5a; --text-3:#888;
+    --accent:#f6821f; --accent-press:#d96c10; --accent-soft:#fef0e2;
+    --blue:#0051c3;
+    --green:#1a7f4b; --green-bg:#e7f4ec;
+    --amber:#9a5b00; --amber-bg:#fbf0dc;
+    --red:#c0392b; --red-bg:#fbe9e7;
+    --gray:#5a5a5a; --gray-bg:#ececec;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --r:4px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{font-family:var(--sans);font-size:13px;line-height:1.45;color:var(--text);background:var(--bg);-webkit-font-smoothing:antialiased}
+  a{color:var(--blue);text-decoration:none}
+  a:hover{text-decoration:underline}
+  button{font-family:inherit;font-size:13px;cursor:pointer}
+  input,select,textarea{font-family:inherit;font-size:13px}
+  code,.mono{font-family:var(--mono)}
 
-<!-- ── Header ───────────────────────────────────────────────────────────── -->
-<div class="border-b border-gray-800 px-6 py-4 flex items-center justify-between">
-  <div class="flex items-center gap-3">
-    <span class="text-2xl">🖨</span>
-    <span class="text-lg font-bold tracking-tight">Printer Admin</span>
-  </div>
-  <div class="flex items-center gap-2">
-    <input id="adminKey" type="password" placeholder="Admin key"
-      class="bg-gray-900 border border-gray-700 rounded px-3 py-1.5 text-sm w-52 focus:outline-none focus:border-gray-500"
-      oninput="saveKey(this.value)">
-    <button onclick="refresh()"
-      class="bg-gray-100 text-gray-900 hover:bg-white px-3 py-1.5 rounded text-sm transition font-medium">
-      Connect
+  /* ── top bar ── */
+  .topbar{height:48px;background:var(--surface);border-bottom:1px solid var(--border);
+    display:flex;align-items:center;gap:10px;padding:0 16px;position:sticky;top:0;z-index:20}
+  .brand{display:flex;align-items:center;gap:8px;font-weight:600;letter-spacing:-.01em}
+  .brand svg{display:block;color:var(--text-2)}
+  .topbar .spacer{flex:1}
+  .health{display:flex;align-items:center;gap:6px;color:var(--text-2);font-size:12px}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--text-3);flex:none}
+  .dot.ok{background:var(--green)} .dot.bad{background:var(--red)} .dot.warn{background:var(--amber)}
+  .keybtn{display:flex;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--border-strong);
+    border-radius:var(--r);padding:5px 9px;color:var(--text-2)}
+  .keybtn:hover{background:var(--surface-2)}
+
+  /* ── tabs ── */
+  .tabs{background:var(--surface);border-bottom:1px solid var(--border);padding:0 16px;display:flex;gap:2px}
+  .tab{appearance:none;background:none;border:0;border-bottom:2px solid transparent;
+    padding:11px 12px;color:var(--text-2);font-weight:500}
+  .tab:hover{color:var(--text)}
+  .tab[aria-selected="true"]{color:var(--text);border-bottom-color:var(--accent)}
+
+  .wrap{max-width:1080px;margin:0 auto;padding:18px 16px 64px}
+
+  /* ── stat strip ── */
+  .stats{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--border);
+    border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:18px}
+  .stat{background:var(--surface);padding:11px 13px}
+  .stat .k{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-3)}
+  .stat .v{font-size:18px;font-weight:600;margin-top:3px;font-variant-numeric:tabular-nums}
+  .stat .v small{font-size:12px;font-weight:400;color:var(--text-3)}
+
+  /* ── panels ── */
+  .panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);margin-bottom:18px}
+  .panel-head{display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:1px solid var(--border)}
+  .panel-head h2{margin:0;font-size:13px;font-weight:600}
+  .panel-head .sub{color:var(--text-3);font-size:12px}
+  .panel-head .spacer{flex:1}
+  .panel-body{padding:14px}
+
+  .eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);
+    font-weight:600;margin:0 0 8px}
+
+  /* ── buttons ── */
+  .btn{appearance:none;border:1px solid var(--border-strong);background:var(--surface);color:var(--text);
+    border-radius:var(--r);padding:6px 11px;font-weight:500;line-height:1.2}
+  .btn:hover{background:var(--surface-2)}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn-primary:hover{background:var(--accent-press);border-color:var(--accent-press)}
+  .btn-sm{padding:3px 8px;font-size:12px}
+  .btn-danger{color:var(--red);border-color:var(--border-strong)}
+  .btn-danger:hover{background:var(--red-bg);border-color:#eccfca}
+  .btn-row{display:flex;gap:8px;flex-wrap:wrap}
+
+  /* ── table ── */
+  table{width:100%;border-collapse:collapse}
+  thead th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;
+    color:var(--text-3);font-weight:600;padding:8px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
+  tbody td{padding:9px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+  tbody tr:last-child td{border-bottom:0}
+  tbody tr:hover{background:var(--surface-2)}
+  td.num{font-variant-numeric:tabular-nums;color:var(--text-3);font-family:var(--mono);font-size:12px}
+  td .msg{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;max-width:340px}
+  td .email{color:var(--text-2);font-size:12px}
+  td.time{color:var(--text-2);white-space:nowrap;font-size:12px}
+  td.actions{white-space:nowrap;text-align:right}
+
+  /* ── pills ── */
+  .pill{display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:600;line-height:1.6;white-space:nowrap}
+  .pill.printed{background:var(--green-bg);color:var(--green)}
+  .pill.queued{background:var(--amber-bg);color:var(--amber)}
+  .pill.skipped{background:var(--gray-bg);color:var(--gray)}
+  .pill.pending{background:var(--accent-soft);color:var(--accent-press)}
+
+  /* ── pagination ── */
+  .pager{display:flex;align-items:center;gap:10px;padding:10px 14px;border-top:1px solid var(--border);color:var(--text-2);font-size:12px}
+  .pager .spacer{flex:1}
+
+  /* ── forms ── */
+  .field{display:grid;grid-template-columns:200px 1fr;gap:14px;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)}
+  .field:last-child{border-bottom:0}
+  .field label{color:var(--text);font-weight:500}
+  .field .hint{display:block;color:var(--text-3);font-size:12px;font-weight:400;margin-top:1px}
+  .field input[type=text],.field input[type=number],.field select{
+    width:100%;max-width:360px;padding:6px 9px;border:1px solid var(--border-strong);border-radius:var(--r);background:var(--surface)}
+  .field input:focus,.field select:focus,.drop:focus-within{outline:2px solid var(--accent);outline-offset:-1px;border-color:var(--accent)}
+  .switch{display:inline-flex;align-items:center;gap:8px}
+  .switch input{width:34px;height:20px;appearance:none;background:var(--border-strong);border-radius:11px;position:relative;cursor:pointer;transition:background .12s}
+  .switch input:checked{background:var(--accent)}
+  .switch input::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;background:#fff;border-radius:50%;transition:left .12s}
+  .switch input:checked::after{left:16px}
+
+  /* ── print tab ── */
+  .print-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:760px){.print-grid{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}.field{grid-template-columns:1fr}}
+  .drop{border:1px dashed var(--border-strong);border-radius:var(--r);background:var(--surface-2);
+    padding:26px 16px;text-align:center;color:var(--text-2);cursor:pointer}
+  .drop.over{border-color:var(--accent);background:var(--accent-soft)}
+  .drop input{display:none}
+  .drop strong{color:var(--text)}
+  .seg{display:inline-flex;border:1px solid var(--border-strong);border-radius:var(--r);overflow:hidden}
+  .seg button{background:var(--surface);border:0;padding:6px 14px;color:var(--text-2);font-weight:500}
+  .seg button + button{border-left:1px solid var(--border-strong)}
+  .seg button[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent-press)}
+  .preview{border:1px solid var(--border);border-radius:var(--r);background:#fff;min-height:120px;
+    display:flex;align-items:flex-start;justify-content:center;padding:12px;overflow:auto;max-height:520px}
+  .preview canvas{image-rendering:pixelated;width:100%;max-width:576px;height:auto}
+  .preview pre{margin:0;font-family:var(--mono);font-size:9px;line-height:9px;white-space:pre;color:#111}
+  .preview .empty{color:var(--text-3);align-self:center}
+
+  /* ── gate ── */
+  .gate{max-width:380px;margin:14vh auto 0;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:22px}
+  .gate h1{font-size:16px;margin:0 0 4px}
+  .gate p{color:var(--text-2);margin:0 0 16px}
+  .gate input{width:100%;padding:8px 10px;border:1px solid var(--border-strong);border-radius:var(--r);margin-bottom:12px}
+  .gate .err{color:var(--red);font-size:12px;margin:-6px 0 12px;min-height:14px}
+
+  /* ── toast ── */
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%) translateY(20px);
+    background:#1f1f1f;color:#fff;padding:9px 15px;border-radius:var(--r);font-size:13px;
+    opacity:0;pointer-events:none;transition:opacity .15s,transform .15s;z-index:50;max-width:90vw}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .toast.bad{background:#7d241b}
+
+  .empty-row td{text-align:center;color:var(--text-3);padding:30px}
+  .muted{color:var(--text-3)}
+  .hidden{display:none!important}
+  @media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<!-- AUTH GATE -->
+<div id="gate" class="gate hidden">
+  <h1>Printer Server</h1>
+  <p>Enter the admin key to continue.</p>
+  <input id="gate-key" type="password" placeholder="Admin key" autocomplete="off" spellcheck="false">
+  <div class="err" id="gate-err"></div>
+  <button class="btn btn-primary" id="gate-go" style="width:100%">Sign in</button>
+</div>
+
+<!-- APP -->
+<div id="app" class="hidden">
+  <div class="topbar">
+    <div class="brand">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="1.5"/><path d="M6 14h12v7H6z"/><circle cx="17.5" cy="12" r=".6" fill="currentColor" stroke="none"/></svg>
+      Printer Server
+    </div>
+    <div class="spacer"></div>
+    <div class="health"><span class="dot" id="health-dot"></span><span id="health-text">—</span></div>
+    <button class="keybtn" id="signout" title="Clear admin key">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+      Sign out
     </button>
   </div>
-</div>
 
-<!-- ── Status bar ────────────────────────────────────────────────────────── -->
-<div id="statusBar" class="px-6 py-3 bg-gray-900 border-b border-gray-800 flex flex-wrap gap-6 items-center text-xs text-gray-400">
-  <span id="healthDot" class="flex items-center gap-1.5">
-    <span class="w-2 h-2 rounded-full bg-gray-600 inline-block"></span>
-    <span>not connected</span>
-  </span>
-  <span id="printerStatus">printer: —</span>
-  <span id="queueStatus">queue: —</span>
-  <span id="hourStatus">this hour: —</span>
-  <span class="ml-auto">
-    <a href="/docs" target="_blank" class="text-gray-500 hover:text-gray-300 hover:underline">API docs</a>
-    &nbsp;·&nbsp;
-    <a href="/metrics" target="_blank" class="text-gray-500 hover:text-gray-300 hover:underline">metrics</a>
-  </span>
-</div>
-
-<!-- ── Main grid ─────────────────────────────────────────────────────────── -->
-<div class="p-6 grid grid-cols-1 xl:grid-cols-3 gap-6">
-
-  <!-- ── Settings panel ───────────────────────────────────────────────────── -->
-  <div class="xl:col-span-1">
-    <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
-      <div class="flex items-center justify-between mb-4">
-        <h2 class="font-bold text-gray-200">Settings</h2>
-        <button onclick="saveSettings()"
-          class="bg-gray-100 text-gray-900 hover:bg-white px-3 py-1 rounded text-xs transition font-medium">
-          Save
-        </button>
-      </div>
-
-      <div id="settingsForm" class="space-y-3">
-        <!-- rendered by JS -->
-      </div>
-
-      <div id="settingsSaved" class="hidden mt-3 text-gray-400 text-xs">Saved.</div>
-      <div id="settingsErr"   class="hidden mt-3 text-gray-500 text-xs"></div>
-    </div>
-
-    <!-- ── Queue actions ───────────────────────────────────────────────────── -->
-    <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 mt-4">
-      <h2 class="font-bold text-gray-200 mb-3">Queue</h2>
-      <div class="flex gap-2">
-        <button onclick="drain()"
-          class="bg-gray-100 text-gray-900 hover:bg-white px-3 py-1.5 rounded text-xs transition font-medium flex-1">
-          Drain queue
-        </button>
-        <button onclick="refresh()"
-          class="bg-gray-800 text-gray-300 hover:bg-gray-700 px-3 py-1.5 rounded text-xs transition flex-1">
-          Refresh
-        </button>
-      </div>
-      <div id="drainMsg" class="hidden mt-2 text-xs text-gray-400"></div>
-    </div>
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" data-tab="messages" aria-selected="true">Messages</button>
+    <button class="tab" role="tab" data-tab="print">Print</button>
+    <button class="tab" role="tab" data-tab="settings">Settings</button>
   </div>
 
-  <!-- ── Messages table ───────────────────────────────────────────────────── -->
-  <div class="xl:col-span-2">
-    <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
-      <div class="flex items-center justify-between mb-4">
-        <h2 class="font-bold text-gray-200">Messages <span id="msgCount" class="text-gray-500 font-normal text-xs"></span></h2>
-        <div class="flex items-center gap-2 text-xs text-gray-400">
-          <button onclick="prevPage()" class="hover:text-white px-2">← prev</button>
-          <span id="pageLabel">page 1</span>
-          <button onclick="nextPage()" class="hover:text-white px-2">next →</button>
+  <div class="wrap">
+    <div class="stats" id="stats">
+      <div class="stat"><div class="k">Pending</div><div class="v" id="s-pending">—</div></div>
+      <div class="stat"><div class="k">Printed / hr</div><div class="v" id="s-hour">—</div></div>
+      <div class="stat"><div class="k">In flight</div><div class="v" id="s-flight">—</div></div>
+      <div class="stat"><div class="k">Printer</div><div class="v" id="s-printer" style="font-size:13px;font-weight:500">—</div></div>
+      <div class="stat"><div class="k">Database</div><div class="v" id="s-db" style="font-size:13px;font-weight:500">—</div></div>
+    </div>
+
+    <!-- MESSAGES -->
+    <section id="tab-messages">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Messages</h2>
+          <span class="sub" id="msg-total"></span>
+          <div class="spacer"></div>
+          <div class="btn-row">
+            <button class="btn btn-sm" id="btn-refresh">Refresh</button>
+            <button class="btn btn-sm" id="btn-drain">Queue all pending</button>
+          </div>
+        </div>
+        <table>
+          <thead><tr>
+            <th style="width:48px">ID</th><th>From</th><th>Message</th>
+            <th style="width:150px">Received</th><th style="width:80px">Status</th><th style="width:130px"></th>
+          </tr></thead>
+          <tbody id="msg-rows">
+            <tr class="empty-row"><td colspan="6">Loading…</td></tr>
+          </tbody>
+        </table>
+        <div class="pager">
+          <span id="pg-label" class="muted"></span>
+          <div class="spacer"></div>
+          <button class="btn btn-sm" id="pg-prev" disabled>Previous</button>
+          <button class="btn btn-sm" id="pg-next" disabled>Next</button>
         </div>
       </div>
+    </section>
 
-      <div id="actionMsg" class="hidden mb-2 text-gray-500 text-xs"></div>
+    <!-- PRINT -->
+    <section id="tab-print" class="hidden">
+      <div class="panel">
+        <div class="panel-head"><h2>Print an image</h2><span class="sub">Bitmap raster or ASCII art</span></div>
+        <div class="panel-body">
+          <div class="print-grid">
+            <div>
+              <p class="eyebrow">Source</p>
+              <label class="drop" id="drop">
+                <input type="file" id="file" accept="image/*">
+                <div><strong>Choose an image</strong> or drag it here</div>
+                <div class="muted" style="margin-top:4px">PNG · JPG · GIF · WebP — paste also works</div>
+              </label>
 
-      <div id="messagesTable" class="overflow-x-auto">
-        <div class="text-gray-600 text-xs">Enter admin key and click Connect.</div>
+              <p class="eyebrow" style="margin-top:18px">Output mode</p>
+              <div class="seg" id="mode">
+                <button data-mode="bitmap" aria-pressed="true">Bitmap</button>
+                <button data-mode="ascii" aria-pressed="false">ASCII</button>
+              </div>
+
+              <div class="btn-row" style="margin-top:18px">
+                <button class="btn btn-primary" id="btn-print" disabled>Print</button>
+                <button class="btn" id="btn-clear" disabled>Clear</button>
+              </div>
+              <p class="muted" id="img-meta" style="margin-top:10px"></p>
+            </div>
+
+            <div>
+              <p class="eyebrow">Preview <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">(576 px paper width)</span></p>
+              <div class="preview" id="preview"><span class="empty">No image selected</span></div>
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
-  </div>
+    </section>
 
+    <!-- SETTINGS -->
+    <section id="tab-settings" class="hidden">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Settings</h2><span class="sub">Stored on the server, applied immediately</span>
+          <div class="spacer"></div>
+          <button class="btn btn-primary btn-sm" id="btn-save" disabled>Save changes</button>
+        </div>
+        <div class="panel-body" id="settings-body">
+          <p class="muted">Loading…</p>
+        </div>
+      </div>
+    </section>
+  </div>
 </div>
 
-<!-- ── Expanded message modal ─────────────────────────────────────────────── -->
-<div id="modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
-     onclick="if(event.target===this)closeModal()">
-  <div class="bg-gray-900 border border-gray-700 rounded-lg p-5 max-w-lg w-full fade">
-    <div class="flex justify-between items-start mb-3">
-      <div id="modalHeader" class="text-sm text-gray-300"></div>
-      <button onclick="closeModal()" class="text-gray-500 hover:text-white text-lg leading-none">✕</button>
-    </div>
-    <pre id="modalBody" class="text-xs text-gray-200 whitespace-pre-wrap break-words bg-gray-950 rounded p-3 max-h-72 overflow-y-auto"></pre>
-    <div id="modalMeta" class="mt-3 text-xs text-gray-500"></div>
-  </div>
-</div>
+<div class="toast" id="toast"></div>
 
 <script>
-// ── State ────────────────────────────────────────────────────────────────────
-
-const PAGE_SIZE = 20;
-let currentPage = 0;
-let totalMsgs   = 0;
-let _msgs       = [];
-
-const SETTING_LABELS = {
-  prints_per_hour:     'Prints / hour (global)',
-  max_per_ip_hour:     'Prints / IP / hour',
-  line_width:          'Line width (chars)',
-  allowed_origin:      'Allowed CORS origin',
-  printer_mode:        'Printer mode  (auto|usb|network)',
-  printer_host:        'Printer IP (network mode)',
-  printer_port:        'Printer port (default 9100)',
-  email_notifications: 'Email notifications (true|false)',
+"use strict";
+/* ── admin key storage: sessionStorage, falling back to memory ── */
+const KEY_NAME = "printer_admin_key";
+let memKey = null;
+const store = {
+  get(){ try{ return sessionStorage.getItem(KEY_NAME) || memKey; }catch{ return memKey; } },
+  set(v){ memKey = v; try{ sessionStorage.setItem(KEY_NAME, v); }catch{} },
+  clear(){ memKey = null; try{ sessionStorage.removeItem(KEY_NAME); }catch{} }
 };
 
-// ── Key persistence ──────────────────────────────────────────────────────────
+const $ = s => document.querySelector(s);
+const el = (t,c,txt)=>{const e=document.createElement(t); if(c)e.className=c; if(txt!=null)e.textContent=txt; return e;};
 
-function saveKey(v) { sessionStorage.setItem('adminKey', v); }
-function getKey()   { return sessionStorage.getItem('adminKey') || ''; }
+function toast(msg, bad){
+  const t=$("#toast"); t.textContent=msg; t.className="toast show"+(bad?" bad":"");
+  clearTimeout(toast._t); toast._t=setTimeout(()=>t.className="toast",2600);
+}
 
-document.addEventListener('DOMContentLoaded', () => {
-  const saved = getKey();
-  if (saved) {
-    document.getElementById('adminKey').value = saved;
-    refresh();
-  }
+async function api(path, {method="GET", body=null}={}){
+  const headers={"X-Admin-Key": store.get() || ""};
+  if(body){ headers["Content-Type"]="application/json"; }
+  const res = await fetch(path,{method,headers,body:body?JSON.stringify(body):null});
+  if(res.status===401){ store.clear(); showGate("Key rejected. Try again."); throw new Error("unauthorized"); }
+  const text = await res.text();
+  let data; try{ data = text?JSON.parse(text):null; }catch{ data=text; }
+  if(!res.ok) throw new Error((data&&data.detail)||(data&&data.error)||("HTTP "+res.status));
+  return data;
+}
+
+/* ── gate ── */
+function showGate(err){
+  $("#app").classList.add("hidden");
+  $("#gate").classList.remove("hidden");
+  $("#gate-err").textContent = err||"";
+  $("#gate-key").value=""; $("#gate-key").focus();
+}
+function showApp(){
+  $("#gate").classList.add("hidden");
+  $("#app").classList.remove("hidden");
+  refreshAll();
+}
+async function trySignIn(k){
+  store.set(k);
+  try{ await api("/queue"); showApp(); }
+  catch(e){ if(e.message!=="unauthorized") showGate("Could not reach server."); }
+}
+$("#gate-go").onclick = ()=>{ const k=$("#gate-key").value.trim(); if(k) trySignIn(k); };
+$("#gate-key").addEventListener("keydown",e=>{ if(e.key==="Enter") $("#gate-go").click(); });
+$("#signout").onclick = ()=>{ store.clear(); showGate(""); };
+
+/* ── tabs ── */
+document.querySelectorAll(".tab").forEach(tab=>{
+  tab.onclick=()=>{
+    document.querySelectorAll(".tab").forEach(t=>t.setAttribute("aria-selected", t===tab));
+    ["messages","print","settings"].forEach(n=>$("#tab-"+n).classList.toggle("hidden", n!==tab.dataset.tab));
+    if(tab.dataset.tab==="settings") loadSettings();
+  };
 });
 
-// ── API helpers ──────────────────────────────────────────────────────────────
-
-async function api(path, opts = {}) {
-  const key = getKey();
-  const res = await fetch(path, {
-    ...opts,
-    headers: { 'Content-Type': 'application/json', 'X-Admin-Key': key, ...(opts.headers || {}) },
-  });
-  if (!res.ok) {
-    const txt = await res.text().catch(() => res.statusText);
-    throw new Error(`${res.status}: ${txt}`);
-  }
-  return res.json();
-}
-
-// ── Refresh all panels ───────────────────────────────────────────────────────
-
-async function refresh() {
-  await Promise.allSettled([loadHealth(), loadQueue(), loadSettings(), loadMessages()]);
-}
-
-// ── Health ───────────────────────────────────────────────────────────────────
-
-async function loadHealth() {
-  try {
-    const h = await fetch('/health').then(r => r.json());
-    const dot  = document.getElementById('healthDot');
-    const psta = document.getElementById('printerStatus');
-    dot.innerHTML = `<span class="w-2 h-2 rounded-full bg-green-400 inline-block"></span><span class="text-green-400">healthy</span>`;
-    psta.textContent = `printer: ${h.printer}`;
-  } catch {
-    const dot = document.getElementById('healthDot');
-    dot.innerHTML = `<span class="w-2 h-2 rounded-full bg-gray-600 inline-block"></span><span class="text-gray-500">unreachable</span>`;
+/* ── status strip + health ── */
+async function refreshStatus(){
+  try{
+    const q = await api("/queue");
+    $("#s-pending").textContent = q.pending;
+    $("#s-hour").innerHTML = `${q.printed_this_hour} <small>/ ${q.limit_per_hour}</small>`;
+    $("#s-flight").textContent = q.in_flight;
+  }catch{}
+  try{
+    const h = await fetch("/health").then(r=>r.json());
+    $("#s-printer").textContent = h.printer || "—";
+    $("#s-db").textContent = h.db || "—";
+    const dot=$("#health-dot");
+    dot.className = "dot "+(h.ok ? "ok":"bad");
+    $("#health-text").textContent = h.ok ? "Healthy" : "Degraded";
+  }catch{
+    $("#health-dot").className="dot bad"; $("#health-text").textContent="Offline";
   }
 }
 
-// ── Queue status ─────────────────────────────────────────────────────────────
-
-async function loadQueue() {
-  try {
-    const q = await api('/queue');
-    document.getElementById('queueStatus').textContent =
-      `queue: ${q.pending} pending, ${q.in_flight} in-flight`;
-    document.getElementById('hourStatus').textContent =
-      `this hour: ${q.printed_this_hour} / ${q.limit_per_hour}`;
-  } catch {
-    document.getElementById('queueStatus').textContent = 'queue: (auth needed)';
-  }
+/* ── messages ── */
+let page=0; const PAGE=25; let total=0;
+function statusOf(m){
+  if(m.printed_at) return ["printed","Printed"];
+  if(m.claimed===2) return ["skipped","Skipped"];
+  if(m.claimed===1) return ["queued","Queued"];
+  return ["pending","Pending"];
 }
-
-// ── Settings ─────────────────────────────────────────────────────────────────
-
-let _currentSettings = {};
-
-async function loadSettings() {
-  try {
-    _currentSettings = await api('/settings');
-    renderSettingsForm(_currentSettings);
-    document.getElementById('settingsErr').classList.add('hidden');
-  } catch (e) {
-    document.getElementById('settingsErr').textContent = e.message;
-    document.getElementById('settingsErr').classList.remove('hidden');
-  }
+function fmtTime(m){
+  return m.browser_time || (m.received_at? m.received_at.replace(" "," · ")+" UTC" : "—");
 }
-
-function renderSettingsForm(s) {
-  const el = document.getElementById('settingsForm');
-  el.innerHTML = Object.entries(SETTING_LABELS).map(([key, label]) => `
-    <div>
-      <label class="block text-xs text-gray-500 mb-1">${label}</label>
-      <input id="s_${key}" type="text" value="${escHtml(s[key] ?? '')}"
-        class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs
-               focus:outline-none focus:border-gray-500">
-    </div>
-  `).join('');
-}
-
-async function saveSettings() {
-  const updates = {};
-  for (const key of Object.keys(SETTING_LABELS)) {
-    const el = document.getElementById(`s_${key}`);
-    if (el) updates[key] = el.value;
-  }
-  try {
-    await api('/settings', { method: 'PATCH', body: JSON.stringify({ settings: updates }) });
-    const saved = document.getElementById('settingsSaved');
-    saved.classList.remove('hidden');
-    document.getElementById('settingsErr').classList.add('hidden');
-    setTimeout(() => saved.classList.add('hidden'), 2000);
-    await loadQueue();
-  } catch (e) {
-    const err = document.getElementById('settingsErr');
-    err.textContent = e.message;
-    err.classList.remove('hidden');
-  }
-}
-
-// ── Drain ────────────────────────────────────────────────────────────────────
-
-async function drain() {
-  const msg = document.getElementById('drainMsg');
-  try {
-    const r = await api('/drain', { method: 'POST' });
-    msg.textContent = `Queued ${r.queued_to_print} message(s) to print.`;
-    msg.classList.remove('hidden');
-    setTimeout(() => msg.classList.add('hidden'), 4000);
-    await loadQueue();
-  } catch (e) {
-    msg.textContent = e.message;
-    msg.classList.remove('hidden');
-  }
-}
-
-// ── Messages table ────────────────────────────────────────────────────────────
-
-async function loadMessages() {
-  const offset = currentPage * PAGE_SIZE;
-  try {
-    const data = await api(`/messages?limit=${PAGE_SIZE}&offset=${offset}`);
-    totalMsgs = data.total;
-    document.getElementById('msgCount').textContent = `(${totalMsgs})`;
-    document.getElementById('pageLabel').textContent =
-      `${currentPage + 1} / ${Math.max(1, Math.ceil(totalMsgs / PAGE_SIZE))}`;
-    renderTable(data.messages);
-  } catch (e) {
-    document.getElementById('messagesTable').innerHTML =
-      `<div class="text-gray-500 text-xs">${escHtml(e.message)}</div>`;
-  }
-}
-
-function renderTable(msgs) {
-  _msgs = msgs;
-  if (!msgs.length) {
-    document.getElementById('messagesTable').innerHTML =
-      '<div class="text-gray-600 text-xs">No messages yet.</div>';
-    return;
-  }
-  const rows = msgs.map((m, i) => {
-    let status;
-    if (m.printed_at) {
-      status = `<span class="text-gray-300">✓</span>`;
-    } else if (m.claimed === 2) {
-      status = `<span class="text-gray-600 text-xs">skipped</span>`;
-    } else if (m.claimed === 1) {
-      status = `<span class="text-gray-500 text-xs">queued</span>`;
-    } else {
-      status = `<span class="flex gap-1" onclick="event.stopPropagation()">
-        <button onclick="printMsg(${m.id})" class="px-1.5 py-0.5 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded text-xs transition">Print</button>
-        <button onclick="skipMsg(${m.id})" class="px-1.5 py-0.5 bg-gray-800 hover:bg-gray-700 text-gray-500 hover:text-gray-400 rounded text-xs transition">Skip</button>
-      </span>`;
+async function loadMessages(){
+  const rows=$("#msg-rows");
+  try{
+    const data = await api(`/messages?limit=${PAGE}&offset=${page*PAGE}`);
+    total = data.total;
+    rows.innerHTML="";
+    if(!data.messages.length){
+      rows.innerHTML=`<tr class="empty-row"><td colspan="6">No messages yet.</td></tr>`;
     }
-    const ts = m.browser_time || m.received_at || '—';
-    const preview = (m.message || '').slice(0, 60) + (m.message.length > 60 ? '…' : '');
-    return `
-      <tr class="border-t border-gray-800 hover:bg-gray-800/50 cursor-pointer"
-          onclick="showModal(${i})">
-        <td class="py-2 px-2 text-gray-500">#${m.id}</td>
-        <td class="py-2 px-2 text-gray-200">${escHtml(m.name)}</td>
-        <td class="py-2 px-2 text-gray-400 hidden sm:table-cell">${escHtml(m.email)}</td>
-        <td class="py-2 px-2 text-gray-300 max-w-xs truncate">${escHtml(preview)}</td>
-        <td class="py-2 px-2 text-gray-500 hidden md:table-cell whitespace-nowrap">${escHtml(ts)}</td>
-        <td class="py-2 px-2">${status}</td>
-      </tr>
-    `;
-  }).join('');
-
-  document.getElementById('messagesTable').innerHTML = `
-    <table class="w-full text-xs">
-      <thead>
-        <tr class="text-gray-500 text-left">
-          <th class="py-1 px-2">ID</th>
-          <th class="py-1 px-2">Name</th>
-          <th class="py-1 px-2 hidden sm:table-cell">Email</th>
-          <th class="py-1 px-2">Message</th>
-          <th class="py-1 px-2 hidden md:table-cell">Received</th>
-          <th class="py-1 px-2">Printed</th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>
-  `;
-}
-
-function prevPage() {
-  if (currentPage > 0) { currentPage--; loadMessages(); }
-}
-function nextPage() {
-  if ((currentPage + 1) * PAGE_SIZE < totalMsgs) { currentPage++; loadMessages(); }
-}
-
-// ── Modal ────────────────────────────────────────────────────────────────────
-
-function showModal(i) {
-  const m = _msgs[i];
-  document.getElementById('modalHeader').innerHTML =
-    `<strong>#${m.id}</strong> &nbsp; ${escHtml(m.name)} &lt;${escHtml(m.email)}&gt;`;
-  document.getElementById('modalBody').textContent = m.message;
-  document.getElementById('modalMeta').textContent =
-    `${m.browser_time || m.received_at || ''}  ·  IP: ${m.ip || '—'}  ·  ${m.printed_at ? 'printed: ' + m.printed_at : 'not yet printed'}`;
-  document.getElementById('modal').classList.remove('hidden');
-}
-function closeModal() { document.getElementById('modal').classList.add('hidden'); }
-
-// ── Per-message actions ───────────────────────────────────────────────────────
-
-function _showActionMsg(text) {
-  const el = document.getElementById('actionMsg');
-  el.textContent = text;
-  el.classList.remove('hidden');
-  setTimeout(() => el.classList.add('hidden'), 4000);
-}
-
-async function printMsg(id) {
-  try {
-    await api(`/print/${id}`, { method: 'POST' });
-    await loadMessages();
-  } catch (e) {
-    _showActionMsg(e.message);
+    for(const m of data.messages){
+      const [cls,label]=statusOf(m);
+      const tr=el("tr");
+      tr.appendChild(Object.assign(el("td","num"),{textContent:"#"+m.id}));
+      const from=el("td"); from.appendChild(el("div",null,m.name||"—"));
+      if(m.email) from.appendChild(el("div","email",m.email));
+      tr.appendChild(from);
+      const msg=el("td"); const d=el("div","msg",m.message||""); msg.appendChild(d); tr.appendChild(msg);
+      tr.appendChild(Object.assign(el("td","time"),{textContent:fmtTime(m)}));
+      const st=el("td"); st.appendChild(el("span","pill "+cls,label)); tr.appendChild(st);
+      const act=el("td","actions");
+      const printable = !m.printed_at && m.claimed===0;
+      if(printable){
+        const p=el("button","btn btn-sm","Print"); p.onclick=()=>act_print(m.id,p);
+        const s=el("button","btn btn-sm btn-danger","Skip"); s.style.marginLeft="6px"; s.onclick=()=>act_skip(m.id,s);
+        act.append(p,s);
+      }
+      tr.appendChild(act);
+      rows.appendChild(tr);
+    }
+    const start=total?page*PAGE+1:0, end=Math.min(total,(page+1)*PAGE);
+    $("#pg-label").textContent = total?`${start}–${end} of ${total}`:"";
+    $("#msg-total").textContent = total?`${total} total`:"";
+    $("#pg-prev").disabled = page===0;
+    $("#pg-next").disabled = end>=total;
+  }catch(e){
+    rows.innerHTML=`<tr class="empty-row"><td colspan="6">Could not load messages — ${e.message}</td></tr>`;
   }
 }
+async function act_print(id,btn){
+  btn.disabled=true;
+  try{ await api(`/print/${id}`,{method:"POST"}); toast(`Queued #${id} for printing`); refreshAll(); }
+  catch(e){ btn.disabled=false; toast(e.message,true); }
+}
+async function act_skip(id,btn){
+  btn.disabled=true;
+  try{ await api(`/skip/${id}`,{method:"POST"}); toast(`Skipped #${id}`); loadMessages(); }
+  catch(e){ btn.disabled=false; toast(e.message,true); }
+}
+$("#btn-refresh").onclick=()=>refreshAll();
+$("#btn-drain").onclick=async()=>{
+  try{ const r=await api("/drain",{method:"POST"}); toast(`Queued ${r.queued_to_print} message(s)`); refreshAll(); }
+  catch(e){ toast(e.message,true); }
+};
+$("#pg-prev").onclick=()=>{ if(page>0){page--; loadMessages();} };
+$("#pg-next").onclick=()=>{ if((page+1)*PAGE<total){page++; loadMessages();} };
 
-async function skipMsg(id) {
-  try {
-    await api(`/skip/${id}`, { method: 'POST' });
-    await loadMessages();
-  } catch (e) {
-    _showActionMsg(e.message);
+/* ── print tab ── */
+const PW=576;          // 80mm (3⅛") head = 576 dots; matches server PRINTER_WIDTH_PX
+const ASCII_COLS=64;   // Font B ≈ 64 cols @ 576px; matches server ASCII_COLUMNS
+let srcB64=null;       // original file bytes (sent to server)
+let srcImg=null;       // Image element for preview
+let mode="bitmap";
+
+document.querySelectorAll("#mode button").forEach(b=>{
+  b.onclick=()=>{
+    mode=b.dataset.mode;
+    document.querySelectorAll("#mode button").forEach(x=>x.setAttribute("aria-pressed", x===b));
+    renderPreview();
+  };
+});
+
+const drop=$("#drop");
+["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("over");}));
+["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("over");}));
+drop.addEventListener("drop",e=>{ const f=e.dataTransfer.files[0]; if(f) loadFile(f); });
+$("#file").addEventListener("change",e=>{ const f=e.target.files[0]; if(f) loadFile(f); });
+window.addEventListener("paste",e=>{
+  if($("#tab-print").classList.contains("hidden")) return;
+  const item=[...(e.clipboardData?.items||[])].find(i=>i.type.startsWith("image/"));
+  if(item) loadFile(item.getAsFile());
+});
+
+function loadFile(file){
+  if(!file.type.startsWith("image/")){ toast("Not an image file",true); return; }
+  if(file.size > 4*1024*1024){ toast("Image is larger than 4 MB",true); return; }
+  const r=new FileReader();
+  r.onload=()=>{
+    srcB64 = r.result.split(",")[1];
+    const img=new Image();
+    img.onload=()=>{
+      srcImg=img;
+      $("#img-meta").textContent = `${file.name} — ${img.width}×${img.height}, ${(file.size/1024).toFixed(0)} KB`;
+      $("#btn-print").disabled=false; $("#btn-clear").disabled=false;
+      renderPreview();
+    };
+    img.onerror=()=>toast("Could not read that image",true);
+    img.src=r.result;
+  };
+  r.readAsDataURL(file);
+}
+
+function fitCanvas(){
+  const h=Math.max(1,Math.round(srcImg.height*PW/srcImg.width));
+  const c=document.createElement("canvas"); c.width=PW; c.height=h;
+  const x=c.getContext("2d"); x.drawImage(srcImg,0,0,PW,h);
+  return {c,x,h};
+}
+function floyd(x,w,h){ // 1-bit Floyd–Steinberg, mirrors PIL convert('1')
+  const d=x.getImageData(0,0,w,h), p=d.data;
+  const g=new Float32Array(w*h);
+  for(let i=0;i<w*h;i++){ g[i]=0.299*p[i*4]+0.587*p[i*4+1]+0.114*p[i*4+2]; }
+  for(let y=0;y<h;y++)for(let xx=0;xx<w;xx++){
+    const i=y*w+xx, old=g[i], nv=old<128?0:255, err=old-nv; g[i]=nv;
+    if(xx+1<w)g[i+1]+=err*7/16;
+    if(y+1<h){ if(xx>0)g[i+w-1]+=err*3/16; g[i+w]+=err*5/16; if(xx+1<w)g[i+w+1]+=err*1/16; }
+  }
+  for(let i=0;i<w*h;i++){ const v=g[i]; p[i*4]=p[i*4+1]=p[i*4+2]=v; p[i*4+3]=255; }
+  x.putImageData(d,0,0);
+}
+const RAMP="@%#*+=-:. ";
+function toAscii(){
+  const cols=ASCII_COLS, {c,x,h}=fitCanvas();
+  const rows=Math.max(1,Math.round(cols*h/PW*0.5));
+  const tmp=document.createElement("canvas"); tmp.width=cols; tmp.height=rows;
+  const tx=tmp.getContext("2d"); tx.drawImage(c,0,0,cols,rows);
+  const p=tx.getImageData(0,0,cols,rows).data; const n=RAMP.length-1; let out="";
+  for(let y=0;y<rows;y++){ let line="";
+    for(let xx=0;xx<cols;xx++){ const i=(y*cols+xx)*4; const gr=(0.299*p[i]+0.587*p[i+1]+0.114*p[i+2])|0;
+      line+=RAMP[(gr*n/255)|0]; }
+    out+=line.replace(/\s+$/,"")+"\n";
+  }
+  return out;
+}
+function renderPreview(){
+  const box=$("#preview");
+  if(!srcImg){ box.innerHTML='<span class="empty">No image selected</span>'; return; }
+  box.innerHTML="";
+  if(mode==="ascii"){
+    box.appendChild(Object.assign(el("pre"),{textContent:toAscii()}));
+  }else{
+    const {c,x,h}=fitCanvas(); floyd(x,PW,h); box.appendChild(c);
   }
 }
+$("#btn-clear").onclick=()=>{
+  srcB64=null; srcImg=null; $("#file").value=""; $("#img-meta").textContent="";
+  $("#btn-print").disabled=true; $("#btn-clear").disabled=true; renderPreview();
+};
+$("#btn-print").onclick=async()=>{
+  if(!srcB64) return;
+  const b=$("#btn-print"); b.disabled=true; const was=b.textContent; b.textContent="Printing…";
+  try{
+    await api("/print/image",{method:"POST",body:{image_b64:srcB64,mode}});
+    toast(`Sent to printer (${mode})`); refreshStatus();
+  }catch(e){ toast(e.message,true); }
+  finally{ b.textContent=was; b.disabled=false; }
+};
 
-// ── Util ─────────────────────────────────────────────────────────────────────
-
-function escHtml(s) {
-  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+/* ── settings ── */
+const INT_KEYS=new Set(["prints_per_hour","max_per_ip_hour","line_width","printer_port","receipt_font_size"]);
+const BOOL_KEYS=new Set(["email_notifications","receipt_show_timestamp","receipt_show_email","receipt_show_id"]);
+const SELECTS={printer_mode:["auto","usb","network"],receipt_font:["receipt","mono","sans","serif"]};
+const LABELS={
+  prints_per_hour:"Prints per hour", max_per_ip_hour:"Max per IP / hour", line_width:"Line width (chars)",
+  allowed_origin:"Allowed origin", printer_mode:"Printer mode", printer_host:"Printer host (IP)",
+  printer_port:"Printer port", email_notifications:"Email notifications", receipt_font:"Receipt font",
+  receipt_font_size:"Receipt font size", receipt_show_timestamp:"Show timestamp", receipt_show_email:"Show email",
+  receipt_show_id:"Show message ID", receipt_title:"Receipt title", receipt_footer:"Receipt footer",
+};
+const ORDER=["prints_per_hour","max_per_ip_hour","allowed_origin","printer_mode","printer_host","printer_port",
+  "line_width","email_notifications","receipt_title","receipt_footer","receipt_font","receipt_font_size",
+  "receipt_show_timestamp","receipt_show_email","receipt_show_id"];
+let original={};
+async function loadSettings(){
+  const body=$("#settings-body");
+  try{
+    const cfg=await api("/settings"); original={...cfg};
+    body.innerHTML="";
+    const keys=ORDER.filter(k=>k in cfg).concat(Object.keys(cfg).filter(k=>!ORDER.includes(k)));
+    for(const k of keys){
+      const row=el("div","field");
+      const lab=el("label",null,LABELS[k]||k); lab.setAttribute("for","set-"+k); row.appendChild(lab);
+      let input;
+      if(BOOL_KEYS.has(k)){
+        const w=el("label","switch"); input=el("input"); input.type="checkbox";
+        input.checked=String(cfg[k]).toLowerCase()==="true"; w.appendChild(input);
+        w.appendChild(el("span","muted")); row.appendChild(w);
+      }else if(SELECTS[k]){
+        input=el("select"); SELECTS[k].forEach(o=>{const op=el("option",null,o);op.value=o;input.appendChild(op);});
+        input.value=cfg[k]; row.appendChild(input);
+      }else{
+        input=el("input"); input.type=INT_KEYS.has(k)?"number":"text"; input.value=cfg[k];
+        const wrap=el("div"); wrap.appendChild(input); row.appendChild(wrap);
+      }
+      input.id="set-"+k; input.dataset.key=k;
+      input.addEventListener("input",dirtyCheck); input.addEventListener("change",dirtyCheck);
+      body.appendChild(row);
+    }
+    dirtyCheck();
+  }catch(e){ body.innerHTML=`<p class="muted">Could not load settings — ${e.message}</p>`; }
 }
+function readField(inp){ return inp.type==="checkbox" ? (inp.checked?"true":"false") : String(inp.value); }
+function dirtyCheck(){
+  let dirty=false;
+  document.querySelectorAll("#settings-body [data-key]").forEach(inp=>{
+    if(readField(inp)!==String(original[inp.dataset.key])) dirty=true;
+  });
+  $("#btn-save").disabled=!dirty;
+}
+$("#btn-save").onclick=async()=>{
+  const changed={};
+  document.querySelectorAll("#settings-body [data-key]").forEach(inp=>{
+    const v=readField(inp); if(v!==String(original[inp.dataset.key])) changed[inp.dataset.key]=v;
+  });
+  if(!Object.keys(changed).length) return;
+  $("#btn-save").disabled=true;
+  try{ const cfg=await api("/settings",{method:"PATCH",body:{settings:changed}});
+    original={...cfg}; dirtyCheck(); toast("Settings saved"); }
+  catch(e){ toast(e.message,true); $("#btn-save").disabled=false; }
+};
+
+/* ── refresh orchestration ── */
+function refreshAll(){ refreshStatus(); loadMessages(); }
+let poll=null;
+function startPolling(){ stopPolling(); poll=setInterval(refreshStatus,8000); }
+function stopPolling(){ if(poll) clearInterval(poll); }
+document.addEventListener("visibilitychange",()=>document.hidden?stopPolling():startPolling());
+
+/* ── boot ── */
+(async function init(){
+  const k=store.get();
+  if(k){ try{ await api("/queue"); showApp(); }catch{ showGate(""); } }
+  else showGate("");
+  startPolling();
+})();
 </script>
 </body>
 </html>

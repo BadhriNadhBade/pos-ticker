@@ -20,9 +20,11 @@ Optional env (override runtime-editable defaults):
 """
 
 from contextlib import asynccontextmanager, contextmanager
-import datetime, json, logging, os, queue, re, sqlite3, smtplib, ssl, threading, unicodedata
+import base64, datetime, io, json, logging, os, queue, re, sqlite3, smtplib, ssl, threading, unicodedata
+from dataclasses import dataclass
 from email.mime.text import MIMEText
 from pathlib import Path
+from typing import Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Depends, HTTPException, Request
@@ -30,7 +32,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 from escpos.printer import Usb, Network
-from PIL import Image, ImageFont
+from PIL import Image, ImageFont, ImageEnhance
 from pilmoji import Pilmoji
 from prometheus_fastapi_instrumentator import Instrumentator
 from prometheus_client import Counter, Gauge
@@ -41,7 +43,14 @@ logger = logging.getLogger("uvicorn.error")
 
 PRINTER_VENDOR_ID  = int(os.environ.get("PRINTER_USB_VENDOR",  "0x0525"), 16)
 PRINTER_PRODUCT_ID = int(os.environ.get("PRINTER_USB_PRODUCT", "0xa700"), 16)
-PRINTER_WIDTH_PX   = int(os.environ.get("PRINTER_WIDTH_PX",    "384"))
+PRINTER_WIDTH_PX   = int(os.environ.get("PRINTER_WIDTH_PX",    "576"))   # 80mm (3⅛") head = 576 dots; use 384 for 58mm
+
+# ── Image input limits (untrusted bytes) ────────────────────────────────────
+MAX_IMAGE_BYTES  = int(os.environ.get("MAX_IMAGE_BYTES",  str(4 * 1024 * 1024)))   # 4 MiB upload cap
+MAX_IMAGE_HEIGHT = int(os.environ.get("MAX_IMAGE_HEIGHT", "1200"))                 # printed-px cap = paper guard
+ASCII_COLUMNS    = int(os.environ.get("ASCII_COLUMNS",    "64"))                   # Font B ≈ 64 cols @ 576px (80mm); 42 @ 384px
+# Refuse to *decode* anything beyond this many pixels (decompression-bomb guard).
+Image.MAX_IMAGE_PIXELS = int(os.environ.get("MAX_IMAGE_PIXELS", str(24_000_000)))
 
 ADMIN_KEY    = os.environ.get("ADMIN_KEY", "")
 SMTP_USER    = os.environ.get("SMTP_USER", "")
@@ -423,6 +432,55 @@ def _render_message_image(text: str, font_size: int = 22, font_path: str = None)
     return img.convert("L").point(lambda x: 0 if x < 200 else 255).convert("1")
 
 
+def _prepare_image(raw: bytes) -> "Image.Image":
+    """Decode untrusted bytes → 1-bit raster sized for the printer.
+    Raises ValueError on anything malformed or oversized."""
+    if not raw:
+        raise ValueError("empty image")
+    if len(raw) > MAX_IMAGE_BYTES:
+        raise ValueError(f"image too large (max {MAX_IMAGE_BYTES} bytes)")
+
+    try:
+        Image.open(io.BytesIO(raw)).verify()   # cheap structural check
+        img = Image.open(io.BytesIO(raw))       # verify() invalidates the handle; reopen
+        img.load()
+    except Image.DecompressionBombError:
+        raise ValueError("image dimensions too large")
+    except Exception:
+        raise ValueError("unreadable image")
+
+    # Flatten transparency onto white so alpha doesn't render as solid black.
+    if img.mode in ("RGBA", "LA", "P"):
+        img = img.convert("RGBA")
+        bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
+        img = Image.alpha_composite(bg, img).convert("RGB")
+    else:
+        img = img.convert("RGB")
+
+    img = ImageEnhance.Contrast(img).enhance(1.4)   # thermal flattens midtones
+
+    if img.width != PRINTER_WIDTH_PX:
+        new_h = max(1, round(img.height * PRINTER_WIDTH_PX / img.width))
+        img = img.resize((PRINTER_WIDTH_PX, new_h), Image.Resampling.LANCZOS)
+    if img.height > MAX_IMAGE_HEIGHT:               # crop = hard paper guard
+        img = img.crop((0, 0, PRINTER_WIDTH_PX, MAX_IMAGE_HEIGHT))
+
+    return img.convert("L").convert("1")            # Floyd–Steinberg → ESC/POS raster
+
+
+_ASCII_RAMP = "@%#*+=-:. "   # dark → light
+
+def _image_to_ascii(img: "Image.Image", columns: int) -> str:
+    g = img.convert("L")
+    rows = max(1, round(columns * g.height / g.width * 0.5))   # chars are ~2× tall
+    g = g.resize((columns, rows))
+    px, ramp, n = g.load(), _ASCII_RAMP, len(_ASCII_RAMP) - 1
+    return "\n".join(
+        "".join(ramp[px[x, y] * n // 255] for x in range(columns)).rstrip()
+        for y in range(rows)
+    )
+
+
 # ── Receipt fonts ─────────────────────────────────────────────────────────────
 
 _RECEIPT_FONTS = {
@@ -537,30 +595,75 @@ def _do_print(row) -> None:
             pass
 
 
+def _do_print_image(img: "Image.Image") -> None:
+    p = _get_printer()
+    try:
+        p.set(align="center")
+        p.image(img)
+        p.set(align="left")
+        p.ln(1)
+        p.cut()
+    finally:
+        try:
+            p.close()
+        except Exception:
+            pass
+
+
+def _do_print_ascii(text: str) -> None:
+    p = _get_printer()
+    try:
+        p.set(align="left", font="b")   # Font B is denser; fits ~42 cols
+        for line in text.split("\n"):
+            p.text(line + "\n")
+        p.set(font="a")
+        p.ln(1)
+        p.cut()
+    finally:
+        try:
+            p.close()
+        except Exception:
+            pass
+
+
 # ── Background print queue ────────────────────────────────────────────────────
+
+@dataclass
+class PrintJob:
+    kind: str                              # "message" | "image" | "ascii"
+    msg_id: Optional[int] = None           # message jobs only
+    row: Optional[sqlite3.Row] = None      # message jobs only
+    image: Optional["Image.Image"] = None  # image jobs
+    text: Optional[str] = None             # ascii jobs
+
 
 _print_queue: queue.Queue = queue.Queue()
 
 
 def _printer_worker():
     while True:
-        item = _print_queue.get()
-        if item is None:
+        job = _print_queue.get()
+        if job is None:
             break
-        msg_id, row = item
         try:
-            _do_print(row)
-            with get_db() as c:
-                c.execute(
-                    "UPDATE messages SET printed_at=?, claimed=0 WHERE id=?",
-                    (_utc_now_string(), msg_id),
-                )
+            if job.kind == "message":
+                _do_print(job.row)
+                with get_db() as c:
+                    c.execute(
+                        "UPDATE messages SET printed_at=?, claimed=0 WHERE id=?",
+                        (_utc_now_string(), job.msg_id),
+                    )
+            elif job.kind == "image":
+                _do_print_image(job.image)
+            elif job.kind == "ascii":
+                _do_print_ascii(job.text)
             _print_counter.labels(result="success").inc()
             _printer_up.set(1)
         except Exception as exc:
-            logger.error("printer worker id=%d: %s", msg_id, exc)
-            with get_db() as c:
-                c.execute("UPDATE messages SET claimed=0 WHERE id=?", (msg_id,))
+            logger.error("printer worker (%s): %s", job.kind, exc)
+            if job.kind == "message" and job.msg_id is not None:
+                with get_db() as c:
+                    c.execute("UPDATE messages SET claimed=0 WHERE id=?", (job.msg_id,))
             _print_counter.labels(result="failed").inc()
             _printer_up.set(0)
         finally:
@@ -645,7 +748,7 @@ async def drain():
         ).fetchall()
     for row in pending:
         _queue_gauge.inc()
-        _print_queue.put((row["id"], row))
+        _print_queue.put(PrintJob(kind="message", msg_id=row["id"], row=row))
     return {"queued_to_print": len(pending)}
 
 
@@ -660,8 +763,38 @@ async def print_message(msg_id: int):
             raise HTTPException(404, "message not found or already printed/claimed")
         c.execute("UPDATE messages SET claimed=1 WHERE id=?", (msg_id,))
     _queue_gauge.inc()
-    _print_queue.put((msg_id, row))
+    _print_queue.put(PrintJob(kind="message", msg_id=msg_id, row=row))
     return {"queued": True}
+
+
+class ImagePrint(BaseModel):
+    image_b64: str
+    mode: str = "bitmap"   # "bitmap" | "ascii"
+
+
+@app.post("/print/image", dependencies=[Depends(require_admin)])
+async def print_image(body: ImagePrint):
+    if body.mode not in ("bitmap", "ascii"):
+        raise HTTPException(400, "mode must be 'bitmap' or 'ascii'")
+    if len(body.image_b64) > MAX_IMAGE_BYTES * 2:   # base64 ≈ 1.33× raw; cheap pre-check
+        raise HTTPException(400, "image too large")
+    try:
+        raw = base64.b64decode(body.image_b64, validate=True)
+    except Exception:
+        raise HTTPException(400, "invalid base64")
+    try:
+        img = _prepare_image(raw)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+    if body.mode == "ascii":
+        job = PrintJob(kind="ascii", text=_image_to_ascii(img, ASCII_COLUMNS))
+    else:
+        job = PrintJob(kind="image", image=img)
+
+    _queue_gauge.inc()
+    _print_queue.put(job)
+    return {"queued": True, "mode": body.mode}
 
 
 @app.post("/skip/{msg_id}", dependencies=[Depends(require_admin)])
@@ -837,5 +970,5 @@ async def contact(request: Request):
 
     _msg_counter.labels(result="accepted").inc()
     _queue_gauge.inc()
-    _print_queue.put((msg_id, row))
+    _print_queue.put(PrintJob(kind="message", msg_id=msg_id, row=row))
     return JSONResponse({"ok": True, "queued": False})
