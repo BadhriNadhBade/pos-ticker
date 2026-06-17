@@ -389,7 +389,9 @@ async function loadMessages(){
       const from=el("td"); from.appendChild(el("div",null,m.name||"—"));
       if(m.email) from.appendChild(el("div","email",m.email));
       tr.appendChild(from);
-      const msg=el("td"); const d=el("div","msg",m.message||""); msg.appendChild(d); tr.appendChild(msg);
+      const msg=el("td"); const d=el("div","msg",m.message||""); msg.appendChild(d);
+      if(m.has_image) msg.appendChild(el("div","email","+ image attached"));
+      tr.appendChild(msg);
       tr.appendChild(Object.assign(el("td","time"),{textContent:fmtTime(m)}));
       const st=el("td"); st.appendChild(el("span","pill "+cls,label)); tr.appendChild(st);
       const act=el("td","actions");

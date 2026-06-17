@@ -267,6 +267,10 @@ def _init_db():
             c.execute("ALTER TABLE messages ADD COLUMN headers TEXT")
         except sqlite3.OperationalError:
             pass
+        try:
+            c.execute("ALTER TABLE messages ADD COLUMN image BLOB")
+        except sqlite3.OperationalError:
+            pass
 
 
 def _release_stale_print_claims() -> None:
@@ -468,6 +472,13 @@ def _prepare_image(raw: bytes) -> "Image.Image":
     return img.convert("L").convert("1")            # Floyd–Steinberg → ESC/POS raster
 
 
+def _image_to_png_bytes(img: "Image.Image") -> bytes:
+    """Serialize a prepared (1-bit) raster for storage in SQLite; reopened at print time."""
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
 _ASCII_RAMP = "@%#*+=-:. "   # dark → light
 
 def _image_to_ascii(img: "Image.Image", columns: int) -> str:
@@ -571,6 +582,14 @@ def _do_print(row) -> None:
         for line in _wrap_text(message, lw):
             p.text(line + "\n")
         p.set(bold=False)
+
+        # ── Attached image (optional, full-width raster) ──────────────────────
+        img_blob = row["image"] if "image" in row.keys() else None
+        if img_blob:
+            p.ln(1)
+            p.set(align="center")
+            p.image(Image.open(io.BytesIO(img_blob)))
+            p.set(align="left")
 
         # ── Meta (id centred) ─────────────────────────────────────────────────
         p.text(thin + "\n")
@@ -813,7 +832,8 @@ async def skip_message(msg_id: int):
 async def list_messages(limit: int = 50, offset: int = 0):
     with get_db() as c:
         rows = c.execute(
-            "SELECT id, name, email, message, ip, received_at, browser_time, printed_at, headers, claimed"
+            "SELECT id, name, email, message, ip, received_at, browser_time, printed_at, headers, claimed,"
+            " (image IS NOT NULL) AS has_image"
             " FROM messages ORDER BY received_at DESC LIMIT ? OFFSET ?",
             (limit, offset),
         ).fetchall()
@@ -927,6 +947,23 @@ async def contact(request: Request):
     if not _has_letters(message) or _looks_gibberish(message):
         return JSONResponse({"error": "message must contain real words"}, status_code=400)
 
+    # Optional image attachment (file upload → base64 from the browser; no URL fetch).
+    # Decoded + sized here so malformed/oversized uploads are rejected before they hit
+    # the queue; the small 1-bit raster is stored and reprinted on the receipt.
+    image_blob = None
+    image_b64 = data.get("image_b64", "") or ""
+    if image_b64:
+        if len(image_b64) > MAX_IMAGE_BYTES * 2:   # base64 ≈ 1.33× raw; cheap pre-check
+            return JSONResponse({"error": "image too large"}, status_code=400)
+        try:
+            raw = base64.b64decode(image_b64, validate=True)
+        except Exception:
+            return JSONResponse({"error": "invalid image data"}, status_code=400)
+        try:
+            image_blob = _image_to_png_bytes(_prepare_image(raw))
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
     if TRUST_PROXY:
         ip = (
             request.headers.get("CF-Connecting-IP")
@@ -948,9 +985,9 @@ async def contact(request: Request):
             return JSONResponse({"error": "too many requests"}, status_code=429)
 
         cursor = c.execute(
-            "INSERT INTO messages (name,email,message,ip,user_agent,received_at,browser_time,headers)"
-            " VALUES (?,?,?,?,?,?,?,?)",
-            (name, email, message, ip, ua, timestamp, browser_time or None, headers),
+            "INSERT INTO messages (name,email,message,ip,user_agent,received_at,browser_time,headers,image)"
+            " VALUES (?,?,?,?,?,?,?,?,?)",
+            (name, email, message, ip, ua, timestamp, browser_time or None, headers, image_blob),
         )
         msg_id     = cursor.lastrowid
         slots_used = _print_slots_used_this_hour(c)
