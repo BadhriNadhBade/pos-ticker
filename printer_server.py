@@ -771,26 +771,14 @@ async def drain():
     return {"queued_to_print": len(pending)}
 
 
-@app.post("/print/{msg_id}", dependencies=[Depends(require_admin)])
-async def print_message(msg_id: int):
-    with get_db() as c:
-        row = c.execute(
-            "SELECT * FROM messages WHERE id=? AND printed_at IS NULL AND claimed=0",
-            (msg_id,),
-        ).fetchone()
-        if not row:
-            raise HTTPException(404, "message not found or already printed/claimed")
-        c.execute("UPDATE messages SET claimed=1 WHERE id=?", (msg_id,))
-    _queue_gauge.inc()
-    _print_queue.put(PrintJob(kind="message", msg_id=msg_id, row=row))
-    return {"queued": True}
-
-
 class ImagePrint(BaseModel):
     image_b64: str
     mode: str = "bitmap"   # "bitmap" | "ascii"
 
 
+# NOTE: the literal "/print/image" route MUST be declared before "/print/{msg_id}".
+# FastAPI matches in declaration order, so a parameterized route placed first would
+# capture "image" as msg_id and fail int parsing ("not a valid integer").
 @app.post("/print/image", dependencies=[Depends(require_admin)])
 async def print_image(body: ImagePrint):
     if body.mode not in ("bitmap", "ascii"):
@@ -814,6 +802,21 @@ async def print_image(body: ImagePrint):
     _queue_gauge.inc()
     _print_queue.put(job)
     return {"queued": True, "mode": body.mode}
+
+
+@app.post("/print/{msg_id}", dependencies=[Depends(require_admin)])
+async def print_message(msg_id: int):
+    with get_db() as c:
+        row = c.execute(
+            "SELECT * FROM messages WHERE id=? AND printed_at IS NULL AND claimed=0",
+            (msg_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "message not found or already printed/claimed")
+        c.execute("UPDATE messages SET claimed=1 WHERE id=?", (msg_id,))
+    _queue_gauge.inc()
+    _print_queue.put(PrintJob(kind="message", msg_id=msg_id, row=row))
+    return {"queued": True}
 
 
 @app.post("/skip/{msg_id}", dependencies=[Depends(require_admin)])
