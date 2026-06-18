@@ -48,7 +48,9 @@ PRINTER_WIDTH_PX   = int(os.environ.get("PRINTER_WIDTH_PX",    "576"))   # 80mm 
 # ── Image input limits (untrusted bytes) ────────────────────────────────────
 MAX_IMAGE_BYTES  = int(os.environ.get("MAX_IMAGE_BYTES",  str(4 * 1024 * 1024)))   # 4 MiB upload cap
 MAX_IMAGE_HEIGHT = int(os.environ.get("MAX_IMAGE_HEIGHT", "1200"))                 # printed-px cap = paper guard
-ASCII_COLUMNS    = int(os.environ.get("ASCII_COLUMNS",    "64"))                   # Font B ≈ 64 cols @ 576px (80mm); 42 @ 384px
+# Font B glyph cell ≈ 9 dots wide; leave a small margin so a full row never
+# overruns the head and wraps onto a second line (which doubles the print length).
+ASCII_COLUMNS    = int(os.environ.get("ASCII_COLUMNS", str(max(16, (PRINTER_WIDTH_PX - 12) // 9))))  # ≈62 @ 576px, ≈41 @ 384px
 # Refuse to *decode* anything beyond this many pixels (decompression-bomb guard).
 Image.MAX_IMAGE_PIXELS = int(os.environ.get("MAX_IMAGE_PIXELS", str(24_000_000)))
 
@@ -632,7 +634,10 @@ def _print_image_banded(p, img: "Image.Image") -> None:
     the image and drops the cut that follows). Bands print contiguously, so the
     result is seamless."""
     w, h = img.size
-    band = max(1, IMAGE_BAND_PX)
+    # ESC * high-density vertical prints in 24-dot stripes; a band height that
+    # isn't a multiple of 24 gets blank-padded on its last stripe, leaving a gap
+    # at every band boundary. Snap to a multiple of 24 so bands tile seamlessly.
+    band = max(24, (IMAGE_BAND_PX // 24) * 24)
     for top in range(0, h, band):
         p.image(img.crop((0, top, w, min(top + band, h))), impl=IMAGE_IMPL)
         if top + band < h:
