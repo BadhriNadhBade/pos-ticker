@@ -942,7 +942,7 @@ async def patch_settings(body: SettingsPatch):
 
 
 # ── Contact input validation ──────────────────────────────────────────────────
-MAX_MESSAGE_CHARS = 300
+MAX_MESSAGE_CHARS = 500
 _KB_ROWS = ("qwertyuiop", "asdfghjkl", "zxcvbnm")
 
 
@@ -1007,8 +1007,8 @@ async def contact(request: Request):
         return JSONResponse({"error": f"message too long (max {MAX_MESSAGE_CHARS} characters)"}, status_code=400)
     if not _has_letters(name) or _looks_gibberish(name):
         return JSONResponse({"error": "invalid name"}, status_code=400)
-    if not _has_letters(message) or _looks_gibberish(message):
-        return JSONResponse({"error": "message must contain real words"}, status_code=400)
+    # Message is intentionally unrestricted beyond the length cap so ASCII art and
+    # symbol-only "doodles" are accepted (no real-words / gibberish check here).
 
     # Optional image attachment (file upload → base64 from the browser; no URL fetch).
     # We validate by running the full prepare pipeline (rejects malformed/oversized
