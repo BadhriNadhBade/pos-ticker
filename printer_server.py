@@ -58,6 +58,12 @@ Image.MAX_IMAGE_PIXELS = int(os.environ.get("MAX_IMAGE_PIXELS", str(24_000_000))
 IMAGE_BAND_PX    = int(os.environ.get("IMAGE_BAND_PX",    "128"))   # rows per raster chunk
 IMAGE_BAND_PAUSE = float(os.environ.get("IMAGE_BAND_PAUSE", "0.2"))  # seconds between chunks
 
+# Raster command encoding. python-escpos defaults to "bitImageRaster" (GS v 0),
+# which many cheap network heads don't implement — they print the command bytes
+# as literal garbage instead. "bitImageColumn" (ESC *) is the most widely
+# supported; "graphics" (GS ( L) is the modern one. Override per printer.
+IMAGE_IMPL = os.environ.get("IMAGE_IMPL", "bitImageColumn")
+
 ADMIN_KEY    = os.environ.get("ADMIN_KEY", "")
 SMTP_USER    = os.environ.get("SMTP_USER", "")
 SMTP_PASS    = os.environ.get("SMTP_PASS", "")
@@ -628,7 +634,7 @@ def _print_image_banded(p, img: "Image.Image") -> None:
     w, h = img.size
     band = max(1, IMAGE_BAND_PX)
     for top in range(0, h, band):
-        p.image(img.crop((0, top, w, min(top + band, h))))
+        p.image(img.crop((0, top, w, min(top + band, h))), impl=IMAGE_IMPL)
         if top + band < h:
             time.sleep(IMAGE_BAND_PAUSE)
 
