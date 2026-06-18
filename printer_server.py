@@ -51,6 +51,9 @@ MAX_IMAGE_HEIGHT = int(os.environ.get("MAX_IMAGE_HEIGHT", "1200"))              
 # Font B glyph cell ≈ 9 dots wide; leave a small margin so a full row never
 # overruns the head and wraps onto a second line (which doubles the print length).
 ASCII_COLUMNS    = int(os.environ.get("ASCII_COLUMNS", str(max(16, (PRINTER_WIDTH_PX - 12) // 9))))  # ≈62 @ 576px, ≈41 @ 384px
+# Line feed (in dots) used for ASCII art so the vertical pitch matches the ~2:1
+# cell aspect the renderer assumes; lower = tighter/shorter print.
+ASCII_LINE_SPACING = int(os.environ.get("ASCII_LINE_SPACING", "18"))
 # Refuse to *decode* anything beyond this many pixels (decompression-bomb guard).
 Image.MAX_IMAGE_PIXELS = int(os.environ.get("MAX_IMAGE_PIXELS", str(24_000_000)))
 
@@ -664,8 +667,13 @@ def _do_print_ascii(text: str) -> None:
     p = _get_printer()
     try:
         p.set(align="left", font="b")   # Font B is denser; fits ~42 cols
+        # Tighten the line feed so the printed pitch matches the ~2:1 cell aspect
+        # the ASCII renderer assumes (Font B ≈ 9 dots wide → ~18-dot pitch). The
+        # printer's ~30-dot default would otherwise stretch the image vertically.
+        p.line_spacing(ASCII_LINE_SPACING)
         for line in text.split("\n"):
             p.text(line + "\n")
+        p.line_spacing()               # restore printer default
         p.set(font="a")
         p.ln(1)
         p.cut()
