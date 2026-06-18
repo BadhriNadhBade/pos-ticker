@@ -489,13 +489,6 @@ def _prepare_image(raw: bytes) -> "Image.Image":
     return img.convert("L").convert("1")            # Floyd–Steinberg → ESC/POS raster
 
 
-def _image_to_png_bytes(img: "Image.Image") -> bytes:
-    """Serialize a prepared (1-bit) raster for storage in SQLite; reopened at print time."""
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    return buf.getvalue()
-
-
 _ASCII_RAMP = "@%#*+=-:. "   # dark → light
 
 def _image_to_ascii(img: "Image.Image", columns: int) -> str:
@@ -601,12 +594,19 @@ def _do_print(row) -> None:
         p.set(bold=False)
 
         # ── Attached image (optional, full-width raster) ──────────────────────
+        # Stored bytes are the ORIGINAL upload; convert to a 1-bit raster here.
         img_blob = row["image"] if "image" in row.keys() else None
         if img_blob:
-            p.ln(1)
-            p.set(align="center")
-            _print_image_banded(p, Image.open(io.BytesIO(img_blob)))
-            p.set(align="left")
+            try:
+                raster = _prepare_image(img_blob)
+            except ValueError as exc:
+                logger.warning("stored image for #%s unprintable: %s", row["id"], exc)
+                raster = None
+            if raster is not None:
+                p.ln(1)
+                p.set(align="center")
+                _print_image_banded(p, raster)
+                p.set(align="left")
 
         # ── Meta (id centred) ─────────────────────────────────────────────────
         p.text(thin + "\n")
@@ -632,29 +632,35 @@ def _do_print(row) -> None:
 
 
 def _print_image_banded(p, img: "Image.Image") -> None:
-    """Send a raster in short horizontal bands, pausing between each so a network
-    printer's small input buffer drains instead of overrunning (which truncates
-    the image and drops the cut that follows). Bands print contiguously, so the
-    result is seamless."""
+    """Send a raster to the printer.
+
+    USB/local printers have no flow-control problem, so the whole image goes in a
+    single command — this is gapless. Column-mode (ESC *) emits a trailing line
+    feed per p.image() call, so splitting into bands would leave an extra blank
+    line at every boundary; we only pay that cost for network printers, whose
+    tiny input buffer overruns (truncated image + dropped cut) on a single tall
+    raster and must be fed in short paced bands instead."""
     w, h = img.size
-    # ESC * high-density vertical prints in 24-dot stripes; a band height that
-    # isn't a multiple of 24 gets blank-padded on its last stripe, leaving a gap
-    # at every band boundary. Snap to a multiple of 24 so bands tile seamlessly.
+    if not _printer_mode_label.startswith("network"):
+        p.image(img, impl=IMAGE_IMPL)
+        return
+    # Network path: snap the band to a multiple of 24 (ESC * high-density stripe
+    # height) so bands tile without padding gaps, and pause after EVERY band —
+    # including the last — so whatever follows (more receipt text, the cut) isn't
+    # pushed into a still-draining buffer and dropped.
     band = max(24, (IMAGE_BAND_PX // 24) * 24)
     for top in range(0, h, band):
         p.image(img.crop((0, top, w, min(top + band, h))), impl=IMAGE_IMPL)
-        if top + band < h:
-            time.sleep(IMAGE_BAND_PAUSE)
+        time.sleep(IMAGE_BAND_PAUSE)
 
 
 def _do_print_image(img: "Image.Image") -> None:
     p = _get_printer()
     try:
         p.set(align="center")
-        _print_image_banded(p, img)
+        _print_image_banded(p, img)   # already drains after the last band
         p.set(align="left")
         p.ln(1)
-        time.sleep(IMAGE_BAND_PAUSE)   # let the last band drain before cut + close
         p.cut()
     finally:
         try:
@@ -885,12 +891,17 @@ async def list_messages(limit: int = 50, offset: int = 0):
 
 @app.get("/messages/{msg_id}/image", dependencies=[Depends(require_admin)])
 async def message_image(msg_id: int):
-    """Serve the stored 1-bit PNG raster (exactly what was / will be printed)."""
+    """Serve the stored ORIGINAL upload (the real photo, not the 1-bit raster)."""
     with get_db() as c:
         row = c.execute("SELECT image FROM messages WHERE id=?", (msg_id,)).fetchone()
     if row is None or row["image"] is None:
         raise HTTPException(404, "no image")
-    return Response(content=row["image"], media_type="image/png")
+    blob = row["image"]
+    try:
+        fmt = (Image.open(io.BytesIO(blob)).format or "PNG").lower()
+    except Exception:
+        fmt = "png"
+    return Response(content=blob, media_type=f"image/{fmt}")
 
 
 @app.get("/settings", dependencies=[Depends(require_admin)])
@@ -1000,8 +1011,10 @@ async def contact(request: Request):
         return JSONResponse({"error": "message must contain real words"}, status_code=400)
 
     # Optional image attachment (file upload → base64 from the browser; no URL fetch).
-    # Decoded + sized here so malformed/oversized uploads are rejected before they hit
-    # the queue; the small 1-bit raster is stored and reprinted on the receipt.
+    # We validate by running the full prepare pipeline (rejects malformed/oversized
+    # uploads before they hit the queue) but store the ORIGINAL bytes so the admin
+    # UI can view the real photo; the 1-bit raster for the receipt is regenerated
+    # from the original at print time.
     image_blob = None
     image_b64 = data.get("image_b64", "") or ""
     if image_b64:
@@ -1012,9 +1025,10 @@ async def contact(request: Request):
         except Exception:
             return JSONResponse({"error": "invalid image data"}, status_code=400)
         try:
-            image_blob = _image_to_png_bytes(_prepare_image(raw))
+            _prepare_image(raw)        # validate only; original is what we persist
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
+        image_blob = raw
 
     if TRUST_PROXY:
         ip = (
