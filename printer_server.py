@@ -20,7 +20,7 @@ Optional env (override runtime-editable defaults):
 """
 
 from contextlib import asynccontextmanager, contextmanager
-import base64, datetime, io, json, logging, os, queue, re, sqlite3, smtplib, ssl, threading, unicodedata
+import base64, datetime, io, json, logging, os, queue, re, sqlite3, smtplib, ssl, threading, time, unicodedata
 from dataclasses import dataclass
 from email.mime.text import MIMEText
 from pathlib import Path
@@ -51,6 +51,12 @@ MAX_IMAGE_HEIGHT = int(os.environ.get("MAX_IMAGE_HEIGHT", "1200"))              
 ASCII_COLUMNS    = int(os.environ.get("ASCII_COLUMNS",    "64"))                   # Font B ≈ 64 cols @ 576px (80mm); 42 @ 384px
 # Refuse to *decode* anything beyond this many pixels (decompression-bomb guard).
 Image.MAX_IMAGE_PIXELS = int(os.environ.get("MAX_IMAGE_PIXELS", str(24_000_000)))
+
+# Raster pacing: network ESC/POS printers have a tiny input buffer and no flow
+# control, so a single tall image overruns it (truncated print + dropped cut).
+# Send it in short horizontal bands and pause between them so the printer drains.
+IMAGE_BAND_PX    = int(os.environ.get("IMAGE_BAND_PX",    "128"))   # rows per raster chunk
+IMAGE_BAND_PAUSE = float(os.environ.get("IMAGE_BAND_PAUSE", "0.2"))  # seconds between chunks
 
 ADMIN_KEY    = os.environ.get("ADMIN_KEY", "")
 SMTP_USER    = os.environ.get("SMTP_USER", "")
@@ -588,7 +594,7 @@ def _do_print(row) -> None:
         if img_blob:
             p.ln(1)
             p.set(align="center")
-            p.image(Image.open(io.BytesIO(img_blob)))
+            _print_image_banded(p, Image.open(io.BytesIO(img_blob)))
             p.set(align="left")
 
         # ── Meta (id centred) ─────────────────────────────────────────────────
@@ -614,13 +620,27 @@ def _do_print(row) -> None:
             pass
 
 
+def _print_image_banded(p, img: "Image.Image") -> None:
+    """Send a raster in short horizontal bands, pausing between each so a network
+    printer's small input buffer drains instead of overrunning (which truncates
+    the image and drops the cut that follows). Bands print contiguously, so the
+    result is seamless."""
+    w, h = img.size
+    band = max(1, IMAGE_BAND_PX)
+    for top in range(0, h, band):
+        p.image(img.crop((0, top, w, min(top + band, h))))
+        if top + band < h:
+            time.sleep(IMAGE_BAND_PAUSE)
+
+
 def _do_print_image(img: "Image.Image") -> None:
     p = _get_printer()
     try:
         p.set(align="center")
-        p.image(img)
+        _print_image_banded(p, img)
         p.set(align="left")
         p.ln(1)
+        time.sleep(IMAGE_BAND_PAUSE)   # let the last band drain before cut + close
         p.cut()
     finally:
         try:
