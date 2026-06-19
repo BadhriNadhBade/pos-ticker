@@ -8,10 +8,10 @@
   :root{
     --bg:#f4f4f4; --surface:#fff; --surface-2:#fafafa;
     --border:#e3e3e3; --border-strong:#d2d2d2;
-    --text:#1a1a1a; --text-2:#5a5a5a; --text-3:#888;
+    --text:#1a1a1a; --text-2:#5a5a5a; --text-3:#6b6b6b;
     --accent:#f6821f; --accent-press:#d96c10; --accent-soft:#fef0e2;
     --blue:#0051c3;
-    --green:#1a7f4b; --green-bg:#e7f4ec;
+    --green:#0f7040; --green-bg:#e7f4ec;
     --amber:#9a5b00; --amber-bg:#fbf0dc;
     --red:#c0392b; --red-bg:#fbe9e7;
     --gray:#5a5a5a; --gray-bg:#ececec;
@@ -82,7 +82,8 @@
   .btn-row{display:flex;gap:8px;flex-wrap:wrap}
 
   /* ── table ── */
-  table{width:100%;border-collapse:collapse}
+  .table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  table{width:100%;border-collapse:collapse;min-width:520px}
   thead th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;
     color:var(--text-3);font-weight:600;padding:8px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
   tbody td{padding:9px 12px;border-bottom:1px solid var(--border);vertical-align:top}
@@ -125,7 +126,8 @@
   .drop{border:1px dashed var(--border-strong);border-radius:var(--r);background:var(--surface-2);
     padding:26px 16px;text-align:center;color:var(--text-2);cursor:pointer}
   .drop.over{border-color:var(--accent);background:var(--accent-soft)}
-  .drop input{display:none}
+  .drop input{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+  .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
   .drop strong{color:var(--text)}
   .seg{display:inline-flex;border:1px solid var(--border-strong);border-radius:var(--r);overflow:hidden}
   .seg button{background:var(--surface);border:0;padding:6px 14px;color:var(--text-2);font-weight:500}
@@ -178,7 +180,7 @@
   <h1>Printer Server</h1>
   <p>Enter the admin key to continue.</p>
   <input id="gate-key" type="password" placeholder="Admin key" autocomplete="off" spellcheck="false">
-  <div class="err" id="gate-err"></div>
+  <div class="err" id="gate-err" role="alert" aria-live="assertive"></div>
   <button class="btn btn-primary" id="gate-go" style="width:100%">Sign in</button>
 </div>
 
@@ -186,21 +188,21 @@
 <div id="app" class="hidden">
   <div class="topbar">
     <div class="brand">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="1.5"/><path d="M6 14h12v7H6z"/><circle cx="17.5" cy="12" r=".6" fill="currentColor" stroke="none"/></svg>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="1.5"/><path d="M6 14h12v7H6z"/><circle cx="17.5" cy="12" r=".6" fill="currentColor" stroke="none"/></svg>
       Printer Server
     </div>
     <div class="spacer"></div>
     <div class="health"><span class="dot" id="health-dot"></span><span id="health-text">—</span></div>
     <button class="keybtn" id="signout" title="Clear admin key">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
       Sign out
     </button>
   </div>
 
-  <div class="tabs" role="tablist">
-    <button class="tab" role="tab" data-tab="messages" aria-selected="true">Messages</button>
-    <button class="tab" role="tab" data-tab="print">Print</button>
-    <button class="tab" role="tab" data-tab="settings">Settings</button>
+  <div class="tabs" role="tablist" aria-label="Sections">
+    <button class="tab" role="tab" id="tabbtn-messages" data-tab="messages" aria-controls="tab-messages" aria-selected="true">Messages</button>
+    <button class="tab" role="tab" id="tabbtn-print" data-tab="print" aria-controls="tab-print" aria-selected="false" tabindex="-1">Print</button>
+    <button class="tab" role="tab" id="tabbtn-settings" data-tab="settings" aria-controls="tab-settings" aria-selected="false" tabindex="-1">Settings</button>
   </div>
 
   <div class="wrap">
@@ -213,7 +215,7 @@
     </div>
 
     <!-- MESSAGES -->
-    <section id="tab-messages">
+    <section id="tab-messages" role="tabpanel" aria-labelledby="tabbtn-messages" tabindex="0">
       <div class="panel">
         <div class="panel-head">
           <h2>Messages</h2>
@@ -224,6 +226,7 @@
             <button class="btn btn-sm" id="btn-drain">Queue all pending</button>
           </div>
         </div>
+        <div class="table-scroll">
         <table>
           <thead><tr>
             <th style="width:48px">ID</th><th>From</th><th>Message</th>
@@ -233,6 +236,7 @@
             <tr class="empty-row"><td colspan="6">Loading…</td></tr>
           </tbody>
         </table>
+        </div>
         <div class="pager">
           <span id="pg-label" class="muted"></span>
           <div class="spacer"></div>
@@ -243,7 +247,7 @@
     </section>
 
     <!-- PRINT -->
-    <section id="tab-print" class="hidden">
+    <section id="tab-print" class="hidden" role="tabpanel" aria-labelledby="tabbtn-print" tabindex="0">
       <div class="panel">
         <div class="panel-head"><h2>Print an image</h2><span class="sub">Bitmap raster or ASCII art</span></div>
         <div class="panel-body">
@@ -251,7 +255,7 @@
             <div>
               <p class="eyebrow">Source</p>
               <label class="drop" id="drop">
-                <input type="file" id="file" accept="image/*">
+                <input type="file" id="file" accept="image/*" aria-label="Choose an image to print">
                 <div><strong>Choose an image</strong> or drag it here</div>
                 <div class="muted" style="margin-top:4px">PNG · JPG · GIF · WebP — paste also works</div>
               </label>
@@ -279,7 +283,7 @@
     </section>
 
     <!-- SETTINGS -->
-    <section id="tab-settings" class="hidden">
+    <section id="tab-settings" class="hidden" role="tabpanel" aria-labelledby="tabbtn-settings" tabindex="0">
       <div class="panel">
         <div class="panel-head">
           <h2>Settings</h2><span class="sub">Stored on the server, applied immediately</span>
@@ -294,10 +298,10 @@
   </div>
 </div>
 
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
 <div class="modal hidden" id="detail">
-  <div class="modal-card">
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="detail-title">
     <button class="modal-x" id="detail-x" aria-label="Close">&times;</button>
     <div id="detail-body"></div>
   </div>
@@ -345,6 +349,7 @@ async function api(path, {method="GET", body=null}={}){
 
 /* ── gate ── */
 function showGate(err){
+  stopPolling();
   $("#app").classList.add("hidden");
   $("#gate").classList.remove("hidden");
   $("#gate-err").textContent = err||"";
@@ -354,23 +359,44 @@ function showApp(){
   $("#gate").classList.add("hidden");
   $("#app").classList.remove("hidden");
   refreshAll();
+  startPolling();
 }
+let signingIn=false;
 async function trySignIn(k){
+  if(signingIn) return;
+  signingIn=true;
+  const go=$("#gate-go"); go.disabled=true; const was=go.textContent; go.textContent="Signing in…";
   store.set(k);
   try{ await api("/queue"); showApp(); }
   catch(e){ if(e.message!=="unauthorized") showGate("Could not reach server."); }
+  finally{ signingIn=false; go.disabled=false; go.textContent=was; }
 }
-$("#gate-go").onclick = ()=>{ const k=$("#gate-key").value.trim(); if(k) trySignIn(k); };
+$("#gate-go").onclick = ()=>{ const k=$("#gate-key").value.trim(); if(k) trySignIn(k); else { $("#gate-err").textContent="Enter the admin key."; $("#gate-key").focus(); } };
 $("#gate-key").addEventListener("keydown",e=>{ if(e.key==="Enter") $("#gate-go").click(); });
 $("#signout").onclick = ()=>{ store.clear(); showGate(""); };
 
-/* ── tabs ── */
-document.querySelectorAll(".tab").forEach(tab=>{
-  tab.onclick=()=>{
-    document.querySelectorAll(".tab").forEach(t=>t.setAttribute("aria-selected", t===tab));
-    ["messages","print","settings"].forEach(n=>$("#tab-"+n).classList.toggle("hidden", n!==tab.dataset.tab));
-    if(tab.dataset.tab==="settings") loadSettings();
-  };
+/* ── tabs (WAI-ARIA tabs pattern: roving tabindex + arrow keys) ── */
+const tabEls=[...document.querySelectorAll(".tab")];
+function activateTab(tab,{focus=false}={}){
+  tabEls.forEach(t=>{
+    const on=t===tab;
+    t.setAttribute("aria-selected", on);
+    t.tabIndex = on ? 0 : -1;
+  });
+  ["messages","print","settings"].forEach(n=>$("#tab-"+n).classList.toggle("hidden", n!==tab.dataset.tab));
+  if(focus) tab.focus();
+  if(tab.dataset.tab==="settings") loadSettings();
+}
+tabEls.forEach((tab,i)=>{
+  tab.onclick=()=>activateTab(tab);
+  tab.addEventListener("keydown",e=>{
+    let j=null;
+    if(e.key==="ArrowRight"||e.key==="ArrowDown") j=(i+1)%tabEls.length;
+    else if(e.key==="ArrowLeft"||e.key==="ArrowUp") j=(i-1+tabEls.length)%tabEls.length;
+    else if(e.key==="Home") j=0;
+    else if(e.key==="End") j=tabEls.length-1;
+    if(j!==null){ e.preventDefault(); activateTab(tabEls[j],{focus:true}); }
+  });
 });
 
 /* ── status strip + health ── */
@@ -447,34 +473,54 @@ async function loadMessages(){
   }
 }
 let detailImgUrl=null;
+let detailReturnFocus=null;
+let detailToken=0;
 function closeDetail(){
+  detailToken++;
   $("#detail").classList.add("hidden");
   if(detailImgUrl){ URL.revokeObjectURL(detailImgUrl); detailImgUrl=null; }
+  if(detailReturnFocus){ try{ detailReturnFocus.focus(); }catch{} detailReturnFocus=null; }
 }
 async function openDetail(m){
+  const myToken=++detailToken;
+  detailReturnFocus = document.activeElement;
   const [cls,label]=statusOf(m);
   const body=$("#detail-body"); body.innerHTML="";
-  body.appendChild(el("h3",null,`#${m.id} · ${m.name||"—"}`));
+  body.appendChild(Object.assign(el("h3",null,`#${m.id} · ${m.name||"—"}`),{id:"detail-title"}));
   const meta=el("div","detail-meta",fmtTime(m)+(m.email?" · "+m.email:""));
   body.appendChild(meta);
   const pill=el("span","pill "+cls,label); pill.style.display="inline-block"; pill.style.marginBottom="14px";
   body.appendChild(pill);
   body.appendChild(el("div","detail-msg",m.message||"—"));
   $("#detail").classList.remove("hidden");
+  $("#detail-x").focus();
   if(m.has_image){
     const note=el("div","muted","Loading image…"); body.appendChild(note);
     try{
       const res=await fetch(`/messages/${m.id}/image`,{headers:{"X-Admin-Key":store.get()||""}});
       if(!res.ok) throw new Error("HTTP "+res.status);
-      detailImgUrl=URL.createObjectURL(await res.blob());
-      const img=el("img","detail-img"); img.src=detailImgUrl; img.alt="attached image";
+      const blob=await res.blob();
+      if(myToken!==detailToken) return;   // modal closed or switched while loading
+      detailImgUrl=URL.createObjectURL(blob);
+      const img=el("img","detail-img"); img.src=detailImgUrl; img.alt=`Attached image for message #${m.id}`;
       note.replaceWith(img);
-    }catch(e){ note.textContent="Could not load image — "+e.message; }
+    }catch(e){ if(myToken===detailToken) note.textContent="Could not load image — "+e.message; }
   }
 }
 $("#detail-x").onclick=closeDetail;
 $("#detail").onclick=e=>{ if(e.target===$("#detail")) closeDetail(); };
-document.addEventListener("keydown",e=>{ if(e.key==="Escape" && !$("#detail").classList.contains("hidden")) closeDetail(); });
+document.addEventListener("keydown",e=>{
+  if($("#detail").classList.contains("hidden")) return;
+  if(e.key==="Escape"){ closeDetail(); return; }
+  if(e.key==="Tab"){
+    const f=[...$("#detail .modal-card").querySelectorAll('button,a[href],input,select,textarea,[tabindex]:not([tabindex="-1"])')]
+      .filter(x=>!x.disabled && x.offsetParent!==null);
+    if(!f.length) return;
+    const first=f[0], last=f[f.length-1];
+    if(e.shiftKey && document.activeElement===first){ e.preventDefault(); last.focus(); }
+    else if(!e.shiftKey && document.activeElement===last){ e.preventDefault(); first.focus(); }
+  }
+});
 
 async function act_print(id,btn){
   btn.disabled=true;
@@ -497,7 +543,6 @@ $("#pg-next").onclick=()=>{ if((page+1)*PAGE<total){page++; loadMessages();} };
 /* ── print tab ── */
 const PW=576;          // 80mm (3⅛") head = 576 dots; matches server PRINTER_WIDTH_PX
 const ASCII_COLS=64;   // Font B ≈ 64 cols @ 576px; matches server ASCII_COLUMNS
-let srcB64=null;       // original file bytes (sent to server)
 let srcImg=null;       // Image element for preview
 let mode="bitmap";
 
@@ -581,7 +626,7 @@ function renderPreview(){
   }
 }
 $("#btn-clear").onclick=()=>{
-  srcB64=null; srcImg=null; $("#file").value=""; $("#img-meta").textContent="";
+  srcImg=null; $("#file").value=""; $("#img-meta").textContent="";
   $("#btn-print").disabled=true; $("#btn-clear").disabled=true; renderPreview();
 };
 // Downscale to the printer's 576px width before sending: the server resizes to
@@ -667,16 +712,19 @@ $("#btn-save").onclick=async()=>{
 /* ── refresh orchestration ── */
 function refreshAll(){ refreshStatus(); loadMessages(); }
 let poll=null;
+function signedIn(){ return !$("#app").classList.contains("hidden"); }
 function startPolling(){ stopPolling(); poll=setInterval(refreshStatus,8000); }
-function stopPolling(){ if(poll) clearInterval(poll); }
-document.addEventListener("visibilitychange",()=>document.hidden?stopPolling():startPolling());
+function stopPolling(){ if(poll){ clearInterval(poll); poll=null; } }
+document.addEventListener("visibilitychange",()=>{
+  if(document.hidden) stopPolling();
+  else if(signedIn()) startPolling();
+});
 
 /* ── boot ── */
 (async function init(){
   const k=store.get();
   if(k){ try{ await api("/queue"); showApp(); }catch{ showGate(""); } }
   else showGate("");
-  startPolling();
 })();
 </script>
 </body>
