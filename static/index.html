@@ -567,7 +567,7 @@ window.addEventListener("paste",e=>{
 
 function loadFile(file){
   if(!file.type.startsWith("image/")){ toast("Not an image file",true); return; }
-  if(file.size > 4*1024*1024){ toast("Image is larger than 4 MB",true); return; }
+  if(file.size > 10*1024*1024){ toast("Image is larger than 10 MB",true); return; }
   const r=new FileReader();
   r.onload=()=>{
     const img=new Image();

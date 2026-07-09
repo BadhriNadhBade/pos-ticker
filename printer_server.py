@@ -46,7 +46,7 @@ PRINTER_PRODUCT_ID = int(os.environ.get("PRINTER_USB_PRODUCT", "0xa700"), 16)
 PRINTER_WIDTH_PX   = int(os.environ.get("PRINTER_WIDTH_PX",    "576"))   # 80mm (3⅛") head = 576 dots; use 384 for 58mm
 
 # ── Image input limits (untrusted bytes) ────────────────────────────────────
-MAX_IMAGE_BYTES  = int(os.environ.get("MAX_IMAGE_BYTES",  str(4 * 1024 * 1024)))   # 4 MiB upload cap
+MAX_IMAGE_BYTES  = int(os.environ.get("MAX_IMAGE_BYTES",  str(10 * 1024 * 1024)))   # 10 MiB upload cap
 MAX_IMAGE_HEIGHT = int(os.environ.get("MAX_IMAGE_HEIGHT", "1200"))                 # printed-px cap = paper guard
 # Font B glyph cell ≈ 9 dots wide; leave a small margin so a full row never
 # overruns the head and wraps onto a second line (which doubles the print length).
