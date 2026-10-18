@@ -1,6 +1,6 @@
 fastapi>=0.111
 uvicorn>=0.29
-python-escpos>=3.0
+python-escpos[usb]>=3.0   # [usb] pulls in pyusb; without it the USB fallback raises at print time
 pillow>=10.0
 pilmoji>=2.0
 prometheus-fastapi-instrumentator>=7.0
