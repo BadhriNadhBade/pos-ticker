@@ -1,0 +1,22 @@
+version: 2
+updates:
+  # Keeps the SHA-pinned actions in .github/workflows/ current (the trailing
+  # "# vX.Y.Z" comment is updated together with the SHA).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+
+  # Base images in the Dockerfile (golang builder etc.).
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly

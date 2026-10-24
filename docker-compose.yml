@@ -1,71 +1,267 @@
+# pos-ticker -- docker compose stack
+#
+#   docker compose up -d                       printer only (default)
+#   docker compose --profile tunnel up -d      + Cloudflare Tunnel (public contact form)
+#   docker compose --profile observability up -d   + Prometheus, node-exporter, OTel collector
+#
+# Profiles can also be set persistently with COMPOSE_PROFILES=tunnel,observability in .env.
+#
+# USB printers: this file deliberately passes NO device through, so network-printer
+# users (and hosts without a printer plugged in) can start the stack. For a USB
+# printer add the override file docker-compose.usb.yml, which passes exactly one
+# /dev/usb/lp* node into the container:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.usb.yml up -d
+#   # or once, in .env:  COMPOSE_FILE=docker-compose.yml:docker-compose.usb.yml
+#
+# (setup.sh writes COMPOSE_FILE for you when it detects a usblp device.)
+#
+# Secrets and scoping: compose reads .env to fill in ${VARS} below, but .env is
+# NOT handed wholesale to any container. Each service lists exactly the
+# variables it needs, so e.g. TUNNEL_TOKEN only ever reaches cloudflared and a
+# compromised printer process cannot read your tunnel or telemetry credentials.
+
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 256          # fork-bomb guard; services below may lower it
+
+x-logging: &logging
+  driver: json-file          # switch to journald if you prefer systemd's journal
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
 
-  # ── Thermal printer API + admin UI ─────────────────────────────────────────
+  # ── Contact-form -> thermal printer, admin UI, /metrics ─────────────────────
   printer:
-    image: ghcr.io/badhrinadhbade/pos-ticker:main
-    # To build from source instead, comment out image: above and uncomment:
+    # Image tag: POS_TICKER_TAG defaults to the `main` branch build. For
+    # reproducible, tamper-evident deployments pin a release AND its digest in
+    # .env (find the digest with `docker buildx imagetools inspect <image>:<tag>`):
+    #   POS_TICKER_TAG=v1.0.0@sha256:<digest>
+    # Verify the signature with the cosign command in the README. Never use :latest.
+    #
+    # Build from source instead of pulling: comment out image: and use
     # build: .
+    image: ghcr.io/badhrinadhbade/pos-ticker:${POS_TICKER_TAG:-main}
     restart: unless-stopped
+    <<: *hardening
+    mem_limit: 256m
+    pids_limit: 128
+    # NOTE: no `env_file: .env` -- the whole .env (TUNNEL_TOKEN, DD_API_KEY, ...)
+    # must not leak into this container. Add new app variables to this list.
+    environment:
+      # Inside the container the listeners must bind 0.0.0.0 so published ports
+      # work. These are fixed here (not read from .env, which is for binary
+      # installs); exposure is controlled by the host-side bind addresses below.
+      PUBLIC_ADDR: "0.0.0.0:8080"
+      ADMIN_ADDR: "0.0.0.0:8000"
+      DB_PATH: /data/messages.db
+      # Soft heap ceiling a bit under mem_limit so the GC works harder before
+      # the kernel OOM-kills the process.
+      GOMEMLIMIT: 200MiB
+
+      # -- auth / network exposure
+      ADMIN_KEY: ${ADMIN_KEY:-}
+      ALLOWED_ORIGIN: ${ALLOWED_ORIGIN:-}
+      TRUST_PROXY: ${TRUST_PROXY:-}
+      ADMIN_ALLOWED_HOSTS: ${ADMIN_ALLOWED_HOSTS:-}
+      DISPLAY_TZ: ${DISPLAY_TZ:-}
+
+      # -- rate limits and abuse caps
+      PRINTS_PER_HOUR: ${PRINTS_PER_HOUR:-}
+      MAX_PER_IP_HOUR: ${MAX_PER_IP_HOUR:-}
+      MAX_SUBMISSIONS_PER_HOUR: ${MAX_SUBMISSIONS_PER_HOUR:-}
+      MAX_PENDING_ROWS: ${MAX_PENDING_ROWS:-}
+      LINE_WIDTH: ${LINE_WIDTH:-}
+
+      # -- printer (PRINTER_USB_DEVICE is also set by docker-compose.usb.yml)
+      PRINTER_MODE: ${PRINTER_MODE:-}
+      PRINTER_HOST: ${PRINTER_HOST:-}
+      PRINTER_PORT: ${PRINTER_PORT:-}
+      PRINTER_WIDTH_PX: ${PRINTER_WIDTH_PX:-}
+      PRINTER_USB_VENDOR: ${PRINTER_USB_VENDOR:-}
+      PRINTER_USB_PRODUCT: ${PRINTER_USB_PRODUCT:-}
+      PRINTER_USB_DEVICE: ${PRINTER_USB_DEVICE:-}
+      PRINTER_ALLOW_LOOPBACK: ${PRINTER_ALLOW_LOOPBACK:-}
+      NOTIFY_MAX_PER_HOUR: ${NOTIFY_MAX_PER_HOUR:-}
+
+      # -- e-mail notifications
+      EMAIL_NOTIFICATIONS: ${EMAIL_NOTIFICATIONS:-}
+      NOTIFY_EMAIL: ${NOTIFY_EMAIL:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+
+      # -- message / image limits and rendering
+      MAX_MESSAGE_CHARS: ${MAX_MESSAGE_CHARS:-}
+      MAX_IMAGE_BYTES: ${MAX_IMAGE_BYTES:-}
+      MAX_IMAGE_PIXELS: ${MAX_IMAGE_PIXELS:-}
+      MAX_IMAGE_HEIGHT: ${MAX_IMAGE_HEIGHT:-}
+      IMAGE_BAND_PX: ${IMAGE_BAND_PX:-}
+      IMAGE_BAND_PAUSE: ${IMAGE_BAND_PAUSE:-}
+      IMAGE_IMPL: ${IMAGE_IMPL:-}
+      ASCII_COLUMNS: ${ASCII_COLUMNS:-}
+      ASCII_LINE_SPACING: ${ASCII_LINE_SPACING:-}
+
+      # -- receipt look
+      RECEIPT_TITLE: ${RECEIPT_TITLE:-}
+      RECEIPT_FOOTER: ${RECEIPT_FOOTER:-}
+      RECEIPT_FONT: ${RECEIPT_FONT:-}
+      RECEIPT_FONT_SIZE: ${RECEIPT_FONT_SIZE:-}
+      RECEIPT_SHOW_EMAIL: ${RECEIPT_SHOW_EMAIL:-}
+      RECEIPT_SHOW_ID: ${RECEIPT_SHOW_ID:-}
+      RECEIPT_SHOW_TIMESTAMP: ${RECEIPT_SHOW_TIMESTAMP:-}
     ports:
-      - "8000:8000"        # API + admin UI (Tailscale: 100.x.x.x:8000, localhost cloudflared)
-    devices:
-      - /dev/bus/usb:/dev/bus/usb   # full USB passthrough for thermal printer
+      # ADMIN: UI + API + /metrics, plain HTTP. Loopback only by default.
+      # To reach it from your tailnet instead, set ADMIN_BIND in .env to this
+      # host's Tailscale IP (`tailscale ip -4`), e.g. ADMIN_BIND=100.101.102.103.
+      # Never route this port through Cloudflare Tunnel or expose it to the internet.
+      - "${ADMIN_BIND:-127.0.0.1}:8000:8000"
+      # PUBLIC: POST /contact and GET /contact/count only. Loopback by default;
+      # the `tunnel` profile reaches it over the compose network (printer:8080),
+      # so it does not need to be published for that. Keep this loopback-only
+      # unless something else on the host (e.g. a host-installed cloudflared)
+      # needs it.
+      - "${PUBLIC_BIND:-127.0.0.1}:8080:8080"
     volumes:
-      - printer_data:/app/data      # SQLite DB
-    env_file: .env
+      - printer_data:/data       # SQLite DB (messages.db + WAL), owned by uid 65532
+    tmpfs:
+      - /tmp:size=16m,mode=1777
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      # Built into the image (`/pos-ticker healthcheck`); repeated here for clarity.
+      test: ["CMD", "/pos-ticker", "healthcheck"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 20s
-    logging:
-      driver: json-file          # switch to journald if running under systemd
-      options:
-        max-size: "10m"
-        max-file: "3"
-    depends_on:
-      otel-collector:
-        condition: service_started
-        required: false   # app starts even if collector is absent
+      start_period: 10s
+    logging: *logging
 
-  # ── System metrics (host network so it sees all Pi interfaces) ──────────────
-  node-exporter:
-    image: prom/node-exporter:latest
+  # ── Cloudflare Tunnel -- ONLY for the public contact form ──────────────────
+  # profile: tunnel
+  #
+  # Uses a remotely-managed tunnel (token). In the Cloudflare Zero Trust
+  # dashboard -> Networks -> Tunnels -> your tunnel -> Public Hostname, add:
+  #
+  #     contact.example.com  ->  HTTP  printer:8080
+  #
+  # Point it at the PUBLIC listener (printer:8080) and nothing else. Do NOT add a
+  # hostname for printer:8000 (admin). The admin listener also rejects requests
+  # carrying CF-Ray / Cf-Connecting-Ip as a second line of defence.
+  #
+  # With a tunnel in front, set TRUST_PROXY=true in .env so per-IP rate limits
+  # use Cf-Connecting-Ip (honoured only from private/loopback peers, which the
+  # tunnel container is).
+  cloudflared:
+    image: cloudflare/cloudflared:${CLOUDFLARED_VERSION:-2025.2.1}
+    profiles: ["tunnel"]
     restart: unless-stopped
-    network_mode: host
-    pid: host
-    volumes:
-      - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
-      - /:/rootfs:ro
+    <<: *hardening
+    mem_limit: 128m
+    command: tunnel --no-autoupdate run
+    environment:
+      # The only service that receives the tunnel token.
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+    depends_on:
+      printer:
+        condition: service_healthy
+    logging: *logging
+
+  # ── Prometheus ──────────────────────────────────────────────────────────────
+  # profile: observability
+  #
+  # /metrics on the admin listener needs the admin key. Prometheus reads it from
+  # a file (`authorization.credentials_file` in prometheus.yml). We create that
+  # file inside the container, on tmpfs, from $ADMIN_KEY at start-up -- the key
+  # is never written to disk on the host and never appears in prometheus.yml.
+  prometheus:
+    image: prom/prometheus:${PROMETHEUS_VERSION:-v3.1.0}
+    profiles: ["observability"]
+    restart: unless-stopped
+    <<: *hardening
+    mem_limit: 512m
+    user: "65534:65534"
+    entrypoint: ["/bin/sh", "-c"]
     command:
+      - >-
+        umask 077;
+        printf '%s' "$$ADMIN_KEY" > /tmp/admin_key;
+        exec /bin/prometheus
+        --config.file=/etc/prometheus/prometheus.yml
+        --storage.tsdb.path=/prometheus
+        --storage.tsdb.retention.time=15d
+        --web.listen-address=:9090
+    environment:
+      ADMIN_KEY: ${ADMIN_KEY:-}
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    tmpfs:
+      - /tmp:size=1m,mode=1777
+    depends_on:
+      printer:
+        condition: service_healthy
+    logging: *logging
+
+  # ── Host metrics ────────────────────────────────────────────────────────────
+  # profile: observability
+  #
+  # Runs on the compose network (not --net=host), so it is reachable only by
+  # Prometheus / the collector and publishes no port. Trade-off: network-interface
+  # counters show the container's namespace, not the host's. CPU, memory, disk,
+  # load and temperature (hwmon) are host-accurate. For per-NIC host stats switch to
+  # `network_mode: host` + `pid: host` and scrape host:9100 instead.
+  # Receives no secrets (no environment).
+  node-exporter:
+    image: prom/node-exporter:${NODE_EXPORTER_VERSION:-v1.8.2}
+    profiles: ["observability"]
+    restart: unless-stopped
+    <<: *hardening
+    mem_limit: 128m
+    user: "65534:65534"
+    command:
+      - '--path.rootfs=/host'
       - '--path.procfs=/host/proc'
       - '--path.sysfs=/host/sys'
       - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host:ro,rslave
+    logging: *logging
 
   # ── OpenTelemetry Collector ─────────────────────────────────────────────────
-  # Routes traces/metrics to any APM backend (Datadog, Jaeger, Grafana Cloud…)
-  # Configure backends in otel-collector.yml — no app code changes needed.
+  # profile: observability
+  #
+  # Scrapes printer:8000/metrics itself (prometheus receiver; the app does not
+  # push OTLP) and fans out to whatever exporters you enable in
+  # otel-collector.yml. The collector image has no shell, so it takes the admin key
+  # from its environment (${env:ADMIN_KEY} in the config). The backend tokens below
+  # go to this service and nowhere else.
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:latest
+    image: otel/opentelemetry-collector-contrib:${OTELCOL_VERSION:-0.116.1}
+    profiles: ["observability"]
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:4317:4317"    # OTLP gRPC  (set OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317)
-      - "127.0.0.1:4318:4318"    # OTLP HTTP
-      - "127.0.0.1:8888:8888"    # Collector self-metrics (scraped by Proxmox Prometheus)
+    <<: *hardening
+    mem_limit: 512m
+    environment:
+      ADMIN_KEY: ${ADMIN_KEY:-}
+      # Uncomment together with the matching exporter in otel-collector.yml:
+      # DD_API_KEY: ${DD_API_KEY:-}
+      # GRAFANA_OTLP_TOKEN: ${GRAFANA_OTLP_TOKEN:-}
     volumes:
       - ./otel-collector.yml:/etc/otelcol-contrib/config.yaml:ro
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    depends_on:
+      printer:
+        condition: service_healthy
+    logging: *logging
 
 volumes:
   printer_data:
+  prometheus_data:

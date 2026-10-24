@@ -1,0 +1,31 @@
+# USB printer override for docker-compose.yml.
+#
+# Passes exactly one usblp character device (default /dev/usb/lp0) into the
+# `printer` container -- not the whole USB bus. Requires:
+#   * the `usblp` kernel module loaded (setup.sh does `modprobe usblp` and
+#     persists it in /etc/modules-load.d/usblp.conf), and
+#   * a udev rule giving group `lp` rw access to /dev/usb/lp* (setup.sh installs
+#     /etc/udev/rules.d/99-pos-ticker-usblp.rules).
+#
+# Enable with either:
+#   docker compose -f docker-compose.yml -f docker-compose.usb.yml up -d
+# or, once, in .env:
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.usb.yml
+#
+# Not enabled by default because Docker refuses to start a container whose
+# `devices:` entry does not exist on the host, which would break network-printer
+# users and hosts with the printer unplugged.
+
+services:
+  printer:
+    devices:
+      - "${PRINTER_USB_DEVICE:-/dev/usb/lp0}:${PRINTER_USB_DEVICE:-/dev/usb/lp0}"
+    # The container runs as uid 65532 with all capabilities dropped, so it relies
+    # on group permission on the device node. Add the host's `lp` group by numeric
+    # gid (Debian/Raspberry Pi OS: 7). setup.sh writes the right value as
+    # PRINTER_GID; check manually with: getent group lp
+    group_add:
+      - "${PRINTER_GID:-7}"
+    environment:
+      # Make the app open the same node that was passed through.
+      PRINTER_USB_DEVICE: "${PRINTER_USB_DEVICE:-/dev/usb/lp0}"

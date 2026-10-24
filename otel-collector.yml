@@ -1,72 +1,69 @@
-# OpenTelemetry Collector — receives traces/metrics from the printer app
-# and fans them out to any combination of backends.
+# OpenTelemetry Collector for the `observability` compose profile.
 #
-# To enable a backend, uncomment its exporter block and add it to
-# the pipelines section. No app code changes needed.
+# pos-ticker does NOT push OTLP. This collector *scrapes* printer:8000/metrics
+# with the prometheus receiver (authenticating with the admin key, injected from
+# the ADMIN_KEY environment variable) and forwards the metrics to any backend.
+#
+# To enable a backend, uncomment its exporter block, add its credentials to .env
+# (and to the otel-collector `environment:` in docker-compose.yml), then add the
+# exporter to the pipeline at the bottom.
+#
+# Note: if you also run the bundled Prometheus, the printer is scraped twice
+# (once by each). That is harmless; use whichever pipeline you prefer.
 
 receivers:
-  otlp:
-    protocols:
-      grpc:
-        endpoint: 0.0.0.0:4317
-      http:
-        endpoint: 0.0.0.0:4318
-
-  # Scrape Prometheus /metrics from the printer app
   prometheus:
     config:
       scrape_configs:
-        - job_name: printer-server
+        - job_name: printer
           scrape_interval: 15s
+          metrics_path: /metrics
+          authorization:
+            type: Bearer
+            credentials: ${env:ADMIN_KEY}
           static_configs:
             - targets: ['printer:8000']
 
 processors:
-  batch:
-    timeout: 5s
   memory_limiter:
     limit_mib: 128
     check_interval: 5s
+  batch:
+    timeout: 5s
 
 exporters:
 
-  # ── Logging (always on — useful for debugging) ──────────────────────────────
+  # ── Logging (always on; useful for debugging) ───────────────────────────────
   debug:
-    verbosity: normal
+    verbosity: basic
 
-  # ── Prometheus remote write (to Proxmox Prometheus) ────────────────────────
+  # ── Prometheus remote write (e.g. to a Prometheus on another host) ─────────
   # prometheusremotewrite:
-  #   endpoint: http://proxmox-tailscale-ip:9090/api/v1/write
+  #   endpoint: http://100.x.y.z:9090/api/v1/write
 
   # ── Datadog ─────────────────────────────────────────────────────────────────
   # datadog:
   #   api:
-  #     key: ${DD_API_KEY}
+  #     key: ${env:DD_API_KEY}
   #     site: datadoghq.com
 
-  # ── Grafana Cloud (via OTLP) ────────────────────────────────────────────────
+  # ── Grafana Cloud (via OTLP/HTTP) ───────────────────────────────────────────
   # otlphttp:
   #   endpoint: https://otlp-gateway-prod-us-central-0.grafana.net/otlp
   #   headers:
-  #     authorization: Basic ${GRAFANA_OTLP_TOKEN}
-
-  # ── Jaeger ───────────────────────────────────────────────────────────────────
-  # otlp/jaeger:
-  #   endpoint: http://jaeger:4317
-  #   tls:
-  #     insecure: true
+  #     authorization: Basic ${env:GRAFANA_OTLP_TOKEN}
 
 service:
-  pipelines:
-
-    traces:
-      receivers:  [otlp]
-      processors: [memory_limiter, batch]
-      exporters:  [debug]
-      # add datadog, otlphttp, etc. here when ready
-
+  telemetry:
     metrics:
-      receivers:  [otlp, prometheus]
+      # Collector self-metrics, scraped by the bundled Prometheus (otel-collector:8888).
+      # (`address` form; valid for the pinned 0.116.x collector. Newer releases use
+      # service.telemetry.metrics.readers -- adjust if you bump OTELCOL_VERSION.)
+      level: basic
+      address: 0.0.0.0:8888
+  pipelines:
+    metrics:
+      receivers:  [prometheus]
       processors: [memory_limiter, batch]
       exporters:  [debug]
-      # add prometheusremotewrite, datadog, etc. here when ready
+      # add prometheusremotewrite, datadog, otlphttp, ... here

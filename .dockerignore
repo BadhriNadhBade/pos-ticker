@@ -1,11 +1,39 @@
-__pycache__
-*.pyc
-*.pyo
-*.db
+# Keep the build context to what `go build` needs (go.mod, go.sum, cmd/, internal/, web/).
+.git
+.github
+.claude
+.gitignore
+
+# secrets and runtime state
 .env
+.env.*
+!.env.example
+**/*.db
+**/*.db-wal
+**/*.db-shm
 data/
-*.service
-*.example
+secrets/
+
+# deployment files are not needed inside the build
+Dockerfile
+docker-compose*.yml
 prometheus.yml
 otel-collector.yml
-docker-compose.yml
+*.service
+setup.sh
+scripts/
+
+# docs and legacy Python reference
+docs/
+*.md
+LICENSE
+printer_server.py
+static/
+requirements.txt
+__pycache__
+*.pyc
+
+# local build output
+bin/
+dist/
+*.exe

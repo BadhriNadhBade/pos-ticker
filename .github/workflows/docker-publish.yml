@@ -1,32 +1,81 @@
-name: Build & publish pos-ticker image
+name: Test, build & publish pos-ticker
 
 on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
   workflow_dispatch:
 
 env:
   REGISTRY:   ghcr.io
-  IMAGE_NAME: ${{ github.repository }}   # ghcr.io/OWNER/pos-ticker — works from any fork
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  IMAGE_NAME: ${{ github.repository }}   # ghcr.io/OWNER/pos-ticker - works from any fork
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build-and-push:
+  # ── Static checks + unit tests ──────────────────────────────────────────────
+  test:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff  # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"; echo "$unformatted"; exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test -race -count=1 ./...
+
+  # ── Container image: build -> scan -> push (multi-arch) -> sign ─────────────
+  image:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
-
+      packages: write      # push to ghcr.io
+      id-token: write      # cosign keyless (OIDC)
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          persist-credentials: false
 
-      - name: Set up QEMU (for ARM cross-build)
-        uses: docker/setup-qemu-action@v3
+      # No QEMU needed: the Dockerfile cross-compiles on the build host and the
+      # final stage is FROM scratch with no RUN steps.
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3.12.0
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Compute version
+        id: ver
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=dev-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Log in to ghcr.io
-        uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3.7.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -34,21 +83,165 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051  # v5.10.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=sha,prefix=sha-
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
 
-      - name: Build and push
-        uses: docker/build-push-action@v6
+      # Build once for the runner arch and load it locally so Trivy can scan it
+      # BEFORE anything is pushed.
+      - name: Build (amd64) for scanning
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6.19.2
+        with:
+          context: .
+          load: true
+          push: false
+          platforms: linux/amd64
+          tags: pos-ticker:scan
+          build-args: VERSION=${{ steps.ver.outputs.version }}
+          provenance: false
+          sbom: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trivy scan (fail on fixable HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2  # v0.28.0
+        with:
+          image-ref: pos-ticker:scan
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          vuln-type: os,library
+
+      - name: Build and push (amd64, arm64, arm/v7)
+        id: push
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6.19.2
         with:
           context: .
           push: true
-          platforms: linux/arm64,linux/arm/v7,linux/amd64
-          tags:    ${{ steps.meta.outputs.tags }}
-          labels:  ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: VERSION=${{ steps.ver.outputs.version }}
+          provenance: mode=max      # SLSA provenance attestation
+          sbom: true                # SPDX SBOM attestation
           cache-from: type=gha
-          cache-to:   type=gha,mode=max
+          cache-to: type=gha,mode=max
+
+      - name: Install cosign
+        if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac  # v3.9.1
+
+      # Keyless: signature is bound to this workflow's OIDC identity and logged
+      # in the public Rekor transparency log. Sign by digest, never by tag.
+      - name: Sign image (cosign keyless)
+        if: github.event_name != 'pull_request'
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          images=""
+          for tag in ${TAGS}; do
+            images+="${tag%%:*}@${DIGEST} "
+          done
+          # shellcheck disable=SC2086
+          cosign sign --yes $(echo ${images} | tr ' ' '\n' | sort -u)
+
+  # ── Static release binaries (single-binary install path) ────────────────────
+  binaries:
+    permissions:
+      contents: read
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { suffix: amd64, goarch: amd64, goarm: "" }
+          - { suffix: arm64, goarch: arm64, goarm: "" }
+          - { suffix: armv7, goarch: arm,   goarm: "7" }
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff  # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Compute version
+        id: ver
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=dev-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build linux/${{ matrix.suffix }}
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          mkdir -p "dist/stage"
+          go build -trimpath -buildvcs=false \
+            -ldflags "-s -w -X main.version=${VERSION}" \
+            -o dist/stage/pos-ticker ./cmd/pos-ticker
+          cp printer.service .env.example LICENSE dist/stage/
+          # Stable asset name (no version) so releases/latest/download/<name> works.
+          tar -C dist/stage --owner=0 --group=0 -czf \
+            "dist/pos-ticker_linux_${{ matrix.suffix }}.tar.gz" \
+            pos-ticker printer.service .env.example LICENSE
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: pos-ticker_linux_${{ matrix.suffix }}
+          path: dist/pos-ticker_linux_${{ matrix.suffix }}.tar.gz
+          if-no-files-found: error
+
+  # ── Checksums, signature and GitHub Release (tags only) ─────────────────────
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [image, binaries]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write      # create the release / upload assets
+      id-token: write      # cosign keyless
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          path: dist
+          pattern: pos-ticker_linux_*
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum pos-ticker_linux_*.tar.gz | tee checksums.txt
+
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac  # v3.9.1
+
+      - name: Sign checksums (cosign keyless)
+        working-directory: dist
+        run: cosign sign-blob --yes --bundle checksums.txt.sigstore.json checksums.txt
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" dist/* --generate-notes --title "$TAG" --repo "$GITHUB_REPOSITORY"
+          fi

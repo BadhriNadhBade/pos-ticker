@@ -1,21 +1,80 @@
+# systemd unit for the single-binary install of pos-ticker.
+# (For the Docker install use `restart: unless-stopped` -- no unit needed.)
+#
+# Install (setup.sh option 2 does all of this):
+#   sudo useradd --system --no-create-home --shell /usr/sbin/nologin pos-ticker
+#   sudo install -m 0755 pos-ticker /usr/local/bin/pos-ticker
+#   sudo install -d -m 0750 /etc/pos-ticker
+#   sudo install -m 0600 .env.example /etc/pos-ticker/pos-ticker.env   # then edit; set ADMIN_KEY
+#   sudo cp printer.service /etc/systemd/system/pos-ticker.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now pos-ticker
+#
+# USB printer: needs the usblp module and a udev rule that gives group `lp`
+# rw on /dev/usb/lp* (setup.sh installs both). The service user joins `lp` below.
+
 [Unit]
-Description=pos-ticker — ESC/POS thermal printer server (docker compose)
-After=docker.service network-online.target
-After=cloudflared.service tailscaled.service
+Description=pos-ticker - contact form to ESC/POS thermal printer
+Documentation=https://github.com/badhrinadhbade/pos-ticker
+After=network-online.target
 Wants=network-online.target
-Requires=docker.service
+# Optional: start after tailscale/cloudflared if they run on this host.
+After=tailscaled.service cloudflared.service
 
 [Service]
 Type=simple
-User=root
-# Update WorkingDirectory to wherever you cloned the repo
-WorkingDirectory=/opt/pos-ticker
+User=pos-ticker
+Group=pos-ticker
+SupplementaryGroups=lp
 
-ExecStart=/usr/bin/docker compose up --remove-orphans
-ExecStop=/usr/bin/docker compose down
+# Config: ADMIN_KEY, ADMIN_ADDR, PUBLIC_ADDR, printer settings, ... (see .env.example)
+EnvironmentFile=/etc/pos-ticker/pos-ticker.env
+# Fixed paths win over the env file.
+Environment=DB_PATH=/var/lib/pos-ticker/messages.db
+ExecStart=/usr/local/bin/pos-ticker
 
 Restart=on-failure
-RestartSec=10s
+RestartSec=5s
+TimeoutStopSec=20s
+
+# State: /var/lib/pos-ticker, created and chowned by systemd.
+StateDirectory=pos-ticker
+StateDirectoryMode=0700
+UMask=0077
+
+# ── Sandboxing ────────────────────────────────────────────────────────────────
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectProc=invisible
+ProcSubset=pid
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+# Only the printer's character devices; everything else under /dev is denied.
+# (PrivateDevices must stay off so the usblp nodes are visible.)
+PrivateDevices=no
+DevicePolicy=closed
+DeviceAllow=/dev/usb/lp0 rw
+DeviceAllow=/dev/usb/lp1 rw
+DeviceAllow=/dev/usb/lp2 rw
+DeviceAllow=/dev/usb/lp3 rw
 
 [Install]
 WantedBy=multi-user.target

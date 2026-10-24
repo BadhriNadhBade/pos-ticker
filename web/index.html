@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Printer Server</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/assets/app.css">
+<script src="/assets/app.js" defer></script>
+</head>
+<body>
+<noscript><p class="noscript">This admin page needs JavaScript.</p></noscript>
+
+<!-- AUTH GATE -->
+<form id="gate" class="gate hidden" autocomplete="off">
+  <h1>Printer Server</h1>
+  <p>Enter the admin key to continue.</p>
+  <label class="sr-only" for="gate-key">Admin key</label>
+  <input id="gate-key" type="password" placeholder="Admin key" autocomplete="off" spellcheck="false">
+  <div class="err" id="gate-err" role="alert" aria-live="assertive"></div>
+  <button class="btn btn-primary block" id="gate-go" type="submit">Sign in</button>
+</form>
+
+<!-- APP -->
+<div id="app" class="hidden">
+  <header class="topbar">
+    <div class="brand">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="1.5"/><path d="M6 14h12v7H6z"/><circle cx="17.5" cy="12" r=".6" fill="currentColor" stroke="none"/></svg>
+      Printer Server
+    </div>
+    <div class="spacer"></div>
+    <div class="health" id="live-wrap"><span class="dot" id="live-dot"></span><span id="live-text">Connecting</span></div>
+    <button class="keybtn" id="btn-help" type="button" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">?</button>
+    <button class="keybtn" id="signout" type="button">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+      Sign out
+    </button>
+  </header>
+
+  <div class="tabs" role="tablist" aria-label="Sections">
+    <button class="tab" role="tab" id="tabbtn-messages" data-tab="messages" aria-controls="tab-messages" aria-selected="true">Messages</button>
+    <button class="tab" role="tab" id="tabbtn-print" data-tab="print" aria-controls="tab-print" aria-selected="false" tabindex="-1">Print</button>
+    <button class="tab" role="tab" id="tabbtn-settings" data-tab="settings" aria-controls="tab-settings" aria-selected="false" tabindex="-1">Settings</button>
+  </div>
+
+  <main class="wrap">
+    <div class="stats" id="stats" aria-label="Queue statistics">
+      <div class="stat"><div class="k">Pending</div><div class="v" id="s-pending">&mdash;</div></div>
+      <div class="stat"><div class="k">Printed / hr</div><div class="v" id="s-hour">&mdash;</div></div>
+      <div class="stat"><div class="k">In flight</div><div class="v" id="s-flight">&mdash;</div></div>
+      <div class="stat"><div class="k">Total</div><div class="v" id="s-total">&mdash;</div></div>
+      <div class="stat"><div class="k">Database</div><div class="v sm" id="s-db">&mdash;</div></div>
+    </div>
+
+    <div class="card-printer" id="printer-card" aria-label="Printer health">
+      <span class="dot" id="pr-dot"></span>
+      <strong>Printer</strong>
+      <span id="pr-state" class="muted">unknown</span>
+      <span class="mono muted" id="pr-mode"></span>
+      <span class="pr-err hidden" id="pr-err" role="status"></span>
+    </div>
+
+    <!-- MESSAGES -->
+    <section id="tab-messages" role="tabpanel" aria-labelledby="tabbtn-messages" tabindex="0">
+      <div class="panel">
+        <div class="panel-head wrap-sm">
+          <h2>Messages</h2>
+          <span class="sub" id="msg-total"></span>
+          <div class="spacer"></div>
+          <div class="btn-row">
+            <button class="btn btn-sm" id="btn-refresh" type="button">Refresh</button>
+            <button class="btn btn-sm" id="btn-drain" type="button">Queue all pending</button>
+          </div>
+        </div>
+        <div class="toolbar">
+          <input id="q" type="search" placeholder="Search messages  ( / )" aria-label="Search messages" autocomplete="off" spellcheck="false">
+          <div class="chips" id="chips" role="group" aria-label="Filter by status">
+            <button type="button" class="chip" data-f="all" aria-pressed="true">All</button>
+            <button type="button" class="chip" data-f="pending" aria-pressed="false">Pending</button>
+            <button type="button" class="chip" data-f="printed" aria-pressed="false">Printed</button>
+            <button type="button" class="chip" data-f="skipped" aria-pressed="false">Skipped</button>
+          </div>
+        </div>
+        <div class="table-scroll">
+        <table>
+          <thead><tr>
+            <th class="w-id">ID</th><th>From</th><th>Message</th>
+            <th class="w-time hide-sm">Received</th><th class="w-st">Status</th><th class="w-act"><span class="sr-only">Actions</span></th>
+          </tr></thead>
+          <tbody id="msg-rows" aria-live="polite">
+            <tr class="empty-row"><td colspan="6">Loading&hellip;</td></tr>
+          </tbody>
+        </table>
+        </div>
+        <div class="pager">
+          <span id="pg-label" class="muted"></span>
+          <div class="spacer"></div>
+          <button class="btn btn-sm" id="pg-prev" type="button" disabled>Previous</button>
+          <button class="btn btn-sm" id="pg-next" type="button" disabled>Next</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- PRINT -->
+    <section id="tab-print" class="hidden" role="tabpanel" aria-labelledby="tabbtn-print" tabindex="0">
+      <div class="panel">
+        <div class="panel-head"><h2>Print an image</h2><span class="sub">Bitmap raster or ASCII art</span></div>
+        <div class="panel-body">
+          <div class="print-grid">
+            <div>
+              <p class="eyebrow">Source</p>
+              <label class="drop" id="drop">
+                <input type="file" id="file" accept="image/*" class="sr-only" aria-label="Choose an image to print">
+                <div><strong>Choose an image</strong> or drag it here</div>
+                <div class="muted mt-4">PNG &middot; JPG &middot; GIF &middot; WebP &mdash; paste also works</div>
+              </label>
+
+              <p class="eyebrow mt-18">Output mode</p>
+              <div class="seg" id="mode" role="group" aria-label="Output mode">
+                <button type="button" data-mode="bitmap" aria-pressed="true">Bitmap</button>
+                <button type="button" data-mode="ascii" aria-pressed="false">ASCII</button>
+              </div>
+
+              <div class="btn-row mt-18">
+                <button class="btn btn-primary" id="btn-print" type="button" disabled>Print</button>
+                <button class="btn" id="btn-clear" type="button" disabled>Clear</button>
+              </div>
+              <p class="muted mt-10" id="img-meta" role="status"></p>
+            </div>
+
+            <div>
+              <p class="eyebrow">Preview <span class="eyebrow-sub">(as printed)</span></p>
+              <div class="preview" id="preview"><span class="empty">No image selected</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section id="tab-settings" class="hidden" role="tabpanel" aria-labelledby="tabbtn-settings" tabindex="0">
+      <div class="panel">
+        <div class="panel-head wrap-sm">
+          <h2>Settings</h2><span class="sub">Stored on the server, applied immediately</span>
+          <div class="spacer"></div>
+          <button class="btn btn-primary btn-sm" id="btn-save" type="button" disabled>Save changes</button>
+        </div>
+        <div class="panel-body" id="settings-body">
+          <p class="muted">Loading&hellip;</p>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>Receipt preview</h2><span class="sub">Uses the saved settings</span></div>
+        <div class="panel-body">
+          <div class="print-grid">
+            <div class="form-col">
+              <label for="pv-name">Name</label>
+              <input id="pv-name" type="text" value="Ada Lovelace" maxlength="64" autocomplete="off">
+              <label for="pv-email">Email</label>
+              <input id="pv-email" type="text" value="ada@example.com" maxlength="64" autocomplete="off">
+              <label for="pv-msg">Message</label>
+              <textarea id="pv-msg" rows="5" maxlength="500">Hello from the receipt preview! Try some accents: caf&eacute;, na&iuml;ve.</textarea>
+            </div>
+            <div>
+              <div class="preview" id="pv-box"><span class="empty">Preview appears here</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+
+<div class="modal hidden" id="modal">
+  <div class="modal-card" id="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="-1">
+    <button class="modal-x" id="modal-x" type="button" aria-label="Close">&times;</button>
+    <h3 id="modal-title"></h3>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+</body>
+</html>

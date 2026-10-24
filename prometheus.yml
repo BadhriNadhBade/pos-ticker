@@ -1,9 +1,21 @@
-# Local Prometheus on the Pi (optional — can run on Proxmox instead).
-# If running on Proxmox, replace service names with the Pi's Tailscale IP
-# (e.g., 100.x.x.x:8000, 100.x.x.x:9100).
+# Prometheus config for the `observability` compose profile.
 #
-# To add this to Proxmox Prometheus, append the scrape_configs below
-# to your existing prometheus.yml with the Tailscale IPs substituted.
+#   docker compose --profile observability up -d
+#
+# printer:8000/metrics requires the admin key. docker-compose.yml writes
+# $ADMIN_KEY to /tmp/admin_key (tmpfs inside the Prometheus container) at start,
+# and Prometheus re-reads that file on every scrape.
+#
+# Using an external Prometheus (e.g. on Proxmox) instead? Scrape the admin
+# listener over Tailscale and put the key in a file on that machine:
+#
+#   - job_name: printer
+#     metrics_path: /metrics
+#     authorization:
+#       type: Bearer
+#       credentials_file: /etc/prometheus/pos-ticker-admin-key   # chmod 600
+#     static_configs:
+#       - targets: ['100.x.y.z:8000']      # ADMIN_BIND address
 
 global:
   scrape_interval:     15s
@@ -13,20 +25,18 @@ global:
 
 scrape_configs:
 
-  - job_name: printer-server
+  - job_name: printer
+    metrics_path: /metrics
+    authorization:
+      type: Bearer
+      credentials_file: /tmp/admin_key
     static_configs:
       - targets: ['printer:8000']
-    # Proxmox equivalent:
-    #   targets: ['100.x.x.x:8000']
 
-  - job_name: node-exporter
+  - job_name: node
     static_configs:
-      - targets: ['localhost:9100']   # node-exporter uses host network
-    # Proxmox equivalent:
-    #   targets: ['100.x.x.x:9100']
+      - targets: ['node-exporter:9100']
 
   - job_name: otel-collector
     static_configs:
       - targets: ['otel-collector:8888']
-    # Proxmox equivalent:
-    #   targets: ['100.x.x.x:8888']
