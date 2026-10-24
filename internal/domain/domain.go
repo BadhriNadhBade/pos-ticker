@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	ErrNotFound  = errors.New("not found")      // message missing or not in the required state
+	ErrNotFound  = errors.New("not found") // message missing or not in the required state
 	ErrRateLimit = errors.New("rate limited")
 )
 
@@ -74,14 +74,14 @@ type Store interface {
 	// InsertMessage atomically: count IP submissions in last hour (>= maxPerIP => RateLimitedIP),
 	// insert, and claim the row if print slots used this hour (printed in last hour OR claimed&unprinted) < perHour.
 	InsertMessage(ctx context.Context, m NewMessage, maxPerIP, perHour int) (InsertResult, error)
-	ClaimPending(ctx context.Context, id int64) (*Message, error)   // ErrNotFound if not pending
-	ClaimAllPending(ctx context.Context) ([]Message, error)         // oldest first
-	Skip(ctx context.Context, id int64) error                       // claimed=2; ErrNotFound if not pending
-	MarkPrinted(ctx context.Context, id int64) error                // printed_at=now, claimed=0
-	ReleaseClaim(ctx context.Context, id int64) error               // claimed=0
-	ReleaseStaleClaims(ctx context.Context) (int, error)            // startup recovery
+	ClaimPending(ctx context.Context, id int64) (*Message, error)               // ErrNotFound if not pending
+	ClaimAllPending(ctx context.Context) ([]Message, error)                     // oldest first
+	Skip(ctx context.Context, id int64) error                                   // claimed=2; ErrNotFound if not pending
+	MarkPrinted(ctx context.Context, id int64) error                            // printed_at=now, claimed=0
+	ReleaseClaim(ctx context.Context, id int64) error                           // claimed=0
+	ReleaseStaleClaims(ctx context.Context) (int, error)                        // startup recovery
 	List(ctx context.Context, limit, offset int) ([]MessageSummary, int, error) // newest first, total
-	Image(ctx context.Context, id int64) ([]byte, error)            // ErrNotFound if none
+	Image(ctx context.Context, id int64) ([]byte, error)                        // ErrNotFound if none
 	Counts(ctx context.Context) (QueueCounts, error)
 	PrintedTotal(ctx context.Context) (int, error)
 	LoadSettings(ctx context.Context) (map[string]string, error)
